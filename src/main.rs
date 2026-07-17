@@ -1,5 +1,6 @@
 use std::env;
 use std::f64::consts::PI;
+use std::fmt::Display;
 use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -26,38 +27,30 @@ fn dct_cos(count: u8, i: u8) -> f64 {
     * f64::cos((2*(count%8)+1) as f64 *(i%8) as f64 *PI/16.0)
 }
 
-struct Bloc {
-    raw_data: [u8; 64],
-    dct_data: [i64; 64],
+struct Bloc<T: num_traits::NumCast + Copy + Display> {
+    data: [T; 64],
 }
 
-impl Bloc {
-    fn do_dct(&mut self) {
+impl<T: num_traits::NumCast + Copy + Display> Bloc<T> {
+    fn do_dct(&mut self) -> Bloc<i64>{
+        let mut res:Bloc<i64>= Bloc { data: [0;64]};
         for i in 0..64 {
             let mut count = 0;
-            self.dct_data[i] = (self.raw_data
+            res.data[i] = (self.data
                 .into_iter()
                 .fold(0.0_f64, |acc, x|{
-                    let res = acc+(x as f64)*dct_cos(count,i as u8);
+                    let res = acc + (x.to_f64().unwrap())*dct_cos(count,i as u8);
                     count+=1;
                     res})
                 * 0.25 * c_function(i as u8/8) * c_function(i as u8%8)) as i64;
         };
+        res
     }
 
-    fn display_raw(&self) {
+    fn display(&self) {
         for i in 0..8 {
             for u in 0..8 {
-                print!("{} ",self.raw_data[i*8+u])
-            }
-            println!();
-        }
-    }
-
-    fn display_dct(&self) {
-        for i in 0..8 {
-            for u in 0..8 {
-                print!("{} ",self.dct_data[i*8+u])
+                print!("{} ",self.data[i*8+u])
             }
             println!();
         }
@@ -87,9 +80,9 @@ fn parse_cmd(args: Vec<String>) -> Result<Lines<BufReader<fs::File>>, JpegError>
     }
 }
 
-fn parse_bloc_line(mut lines: Lines<BufReader<fs::File>>, sizex: u32) -> Result<Vec<Bloc>, JpegError> {
-    let mut blocs: Vec<Bloc> = Vec::new();
-    for _ in  0..sizex { blocs.push(Bloc { raw_data: [0;64], dct_data: [0;64] }); };
+fn parse_bloc_line(mut lines: Lines<BufReader<fs::File>>, sizex: u32) -> Result<Vec<Bloc<u8>>, JpegError> {
+    let mut blocs: Vec<Bloc<u8>> = Vec::new();
+    for _ in  0..sizex { blocs.push(Bloc { data: [0;64] }); };
 
     for bline in 0..8 {
         let Some(Ok(line)) = lines.next() else {
@@ -103,7 +96,7 @@ fn parse_bloc_line(mut lines: Lines<BufReader<fs::File>>, sizex: u32) -> Result<
             .map(|s| s.parse::<u8>())
             .filter_map(|r| r.map_err(|_|errors=true).ok())
             .for_each(|x| {
-                blocs[count/8].raw_data[8*bline + count%8] = x;
+                blocs[count/8].data[8*bline + count%8] = x;
                 count+=1;});
         if errors {
             return Err(JpegError::ReadError);
@@ -118,8 +111,8 @@ fn main() -> Result<(), JpegError>{
     let args: Vec<String> = env::args().collect();
     let lines = parse_cmd(args)?;
     let mut blocs = parse_bloc_line(lines, 1)?;
-    blocs.iter_mut().for_each(|b| b.do_dct());
-    blocs[0].display_dct();
+    let blocs:Vec<Bloc<i64>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
+    blocs[0].display();
 
     Ok(())
 }
