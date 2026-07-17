@@ -15,15 +15,15 @@ enum JpegError {
 
 fn c_function(u: u8) -> f64 {
     if u == 0 {
-        1.0/(2.0_f64).sqrt()
+        1.0/((2.0_f64).sqrt())
     } else {
         1.0
     }
 }
 
-fn dct_cos(x: u8, i: u8) -> f64 {
-    f64::cos((2*(x/8)+1) as f64 *(i/8) as f64 *PI/16.0)
-    * f64::cos((2*(x%8)+1) as f64 *(i%8) as f64 *PI/16.0)
+fn dct_cos(count: u8, i: u8) -> f64 {
+    f64::cos((2*(count/8)+1) as f64 *(i/8) as f64 *PI/16.0)
+    * f64::cos((2*(count%8)+1) as f64 *(i%8) as f64 *PI/16.0)
 }
 
 struct Bloc {
@@ -34,9 +34,13 @@ struct Bloc {
 impl Bloc {
     fn do_dct(&mut self) {
         for i in 0..64 {
+            let mut count = 0;
             self.dct_data[i] = (self.raw_data
                 .into_iter()
-                .fold(0.0_f64, |acc, x| acc+(x as f64)*dct_cos(x,i as u8))
+                .fold(0.0_f64, |acc, x|{
+                    let res = acc+(x as f64)*dct_cos(count,i as u8);
+                    count+=1;
+                    res})
                 * 0.25 * c_function(i as u8/8) * c_function(i as u8%8)) as i64;
         };
     }
@@ -113,9 +117,8 @@ fn main() -> Result<(), JpegError>{
 
     let args: Vec<String> = env::args().collect();
     let lines = parse_cmd(args)?;
-    let mut blocs = parse_bloc_line(lines, 2)?;
+    let mut blocs = parse_bloc_line(lines, 1)?;
     blocs.iter_mut().for_each(|b| b.do_dct());
-    blocs[0].display_raw();
     blocs[0].display_dct();
 
     Ok(())
