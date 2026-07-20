@@ -5,6 +5,7 @@ use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Lines;
+use std::ptr::read;
 
 
 #[derive(Debug)]
@@ -92,7 +93,6 @@ fn parse_bloc_line(mut lines: Lines<BufReader<fs::File>>, sizex: u32) -> Result<
         let mut errors = false;
         line
             .split(" ")
-            .into_iter()
             .map(|s| s.parse::<u8>())
             .filter_map(|r| r.map_err(|_|errors=true).ok())
             .for_each(|x| {
@@ -106,6 +106,33 @@ fn parse_bloc_line(mut lines: Lines<BufReader<fs::File>>, sizex: u32) -> Result<
     Ok(blocs)
 }
 
+fn read_quant(s: String) -> Result<Bloc<u8>,JpegError> {
+    let Ok(file) = fs::File::open(s) else {
+        return Err(JpegError::FileError);
+    };
+    let mut lines = BufReader::new(file).lines();
+    let mut quant:Bloc<u8> = Bloc { data: [0;64] };
+    for l in 0..8 {
+        let Some(Ok(line)) = lines.next() else {
+            return Err(JpegError::ReadError);
+        };
+        let mut count = 0;
+        let mut errors = false;
+        line
+            .split(" ")
+            .map(|s| s.parse::<u8>())
+            .filter_map(|r| r.map_err(|_|errors=true).ok())
+            .for_each(|x| {
+                quant.data[8*l + count%8] = x;
+                count+=1;});
+        if errors {
+            return Err(JpegError::ReadError);
+        }
+    };
+
+    Ok(quant)
+}
+
 fn main() -> Result<(), JpegError>{
 
     let args: Vec<String> = env::args().collect();
@@ -113,6 +140,8 @@ fn main() -> Result<(), JpegError>{
     let mut blocs = parse_bloc_line(lines, 1)?;
     let blocs:Vec<Bloc<i64>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
     blocs[0].display();
+    let quant = read_quant("quant/table".to_string())?;
+    quant.display();
 
     Ok(())
 }
