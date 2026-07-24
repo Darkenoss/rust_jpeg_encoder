@@ -5,7 +5,6 @@ use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Lines;
-
 use num_traits::Num;
 use num_traits::ToPrimitive;
 
@@ -28,6 +27,10 @@ fn c_function(u: u8) -> f64 {
 fn dct_cos(count: u8, i: u8) -> f64 {
     f64::cos((2*(count/8)+1) as f64 *(i/8) as f64 *PI/16.0)
     * f64::cos((2*(count%8)+1) as f64 *(i%8) as f64 *PI/16.0)
+}
+
+struct BitStream {
+    stream: Vec<bool>,
 }
 
 struct Bloc<T: num_traits::NumCast + Copy + Display + Num> {
@@ -87,6 +90,44 @@ impl<T: num_traits::NumCast + Copy + Display + Num> Bloc<T> {
             }
             println!();
         }
+    }
+}
+
+impl BitStream {
+    fn add(&mut self, mut nb: u16) {
+        while nb != 0 {
+            self.stream.push((nb & 1) != 0);
+            nb >>= 1;
+        }
+    }
+
+    fn display(&self) {
+        self.stream.iter().for_each(|b|print!("{} ",b));
+        println!("");
+    }
+
+    fn to_byte(&self) -> Vec<u8> {
+        let mut res = vec![];
+        let mut nb: u8 = 0;
+        let mut count:u8 = 0;
+        self.stream.iter().for_each(|b|{
+            nb<<=1;
+            if *b {
+                nb+=1;
+            }
+            count+=1;
+            if count==8 {
+                res.push(nb);
+                count = 0;
+                nb = 0;
+            }
+        });
+
+        if count!=0 {
+            nb <<= 8-count;
+            res.push(nb);
+        }
+        res
     }
 }
 
@@ -178,6 +219,15 @@ fn main() -> Result<(), JpegError>{
     blocs[0].display();
     let blocs:Vec<Vec<i16>> = blocs.iter_mut().map(|b| b.do_zigzag()).collect();
     blocs[0].iter().for_each(|x|print!("{x} "));
+
+    let mut stream = BitStream {stream : vec![]};
+    stream.add(9);
+    stream.add(1);
+    stream.add(1);
+    stream.display();
+
+    let test = stream.to_byte();
+    println!("{:08b}",test[0]);
 
     Ok(())
 }
