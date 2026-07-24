@@ -211,10 +211,10 @@ fn read_quant(s: String) -> Result<Bloc<u8>,JpegError> {
     Ok(quant)
 }
 
-fn magnitude_code(mut nb: i16) -> Result<(u8, BitStream),JpegError> {
+fn magnitude_code(mut nb: i16, max: i16) -> Result<(u8, BitStream),JpegError> {
     let mut temp = 0;
     let mut stream = BitStream {stream: vec![]};
-    if nb > 2047 || nb < -2047 {
+    if nb > max || nb < -max {
         return Err(JpegError::OutOfRange);
     }
     while nb.abs() >= 1<<temp {
@@ -228,6 +228,35 @@ fn magnitude_code(mut nb: i16) -> Result<(u8, BitStream),JpegError> {
     }
     Ok((temp,stream))
 
+}
+
+fn mcu_encoding(mcu: &Vec<i16>, last_dc:i16) -> Result<Vec<(u8,BitStream)>,JpegError> {
+    let mut output:Vec<(u8,BitStream)> = vec![];
+    let mut count =0;
+    let mut last = 0;
+    for byte in mcu {
+        if count == 0 {
+            output.push(magnitude_code(byte-last_dc, 2047)?);
+            count+=1;
+            continue;
+        };
+        if *byte == 0 {
+            last+=1;
+            if last == 16 {
+                output.push((0xF0,BitStream{stream: vec![]}));
+                last = 0;
+            }
+        } else {
+            let (mag,stream) = magnitude_code(*byte, 1023)?;
+            output.push((((last<<4)+mag),stream));
+            last = 0;
+        };
+        count+=1;
+    };
+    if count < 64 {
+        output.push((0x00,BitStream{stream: vec![]}));
+    }
+    Ok(output)
 }
 
 fn main() -> Result<(), JpegError>{
@@ -253,11 +282,17 @@ fn main() -> Result<(), JpegError>{
     let test = stream.to_byte();
     println!("{:08b}",test[0]);
 
-    let (mag, val) = magnitude_code(-6)?;
+    let (mag, val) = magnitude_code(-6,2047)?;
     println!("{}",mag);
     val.display();
     stream.add_stream(val);
     stream.display();
+
+    let enc = mcu_encoding(&blocs[0], 0)?;
+    for vec in enc {
+        print!("{:02x} ",vec.0);
+        vec.1.display();
+    }
 
     Ok(())
 }
