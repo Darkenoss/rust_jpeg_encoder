@@ -14,6 +14,7 @@ enum JpegError {
     FileError,
     HelpError,
     ReadError,
+    OutOfRange,
 }
 
 fn c_function(u: u8) -> f64 {
@@ -99,6 +100,10 @@ impl BitStream {
             self.stream.push((nb & 1) != 0);
             nb >>= 1;
         }
+    }
+
+    fn add_stream(&mut self, stream: BitStream) {
+        stream.stream.iter().for_each(|b| self.stream.push(*b));
     }
 
     fn display(&self) {
@@ -206,6 +211,25 @@ fn read_quant(s: String) -> Result<Bloc<u8>,JpegError> {
     Ok(quant)
 }
 
+fn magnitude_code(mut nb: i16) -> Result<(u8, BitStream),JpegError> {
+    let mut temp = 0;
+    let mut stream = BitStream {stream: vec![]};
+    if nb > 2047 || nb < -2047 {
+        return Err(JpegError::OutOfRange);
+    }
+    while nb.abs() >= 1<<temp {
+        temp+=1;
+    };
+    if nb<0 {
+        nb += (1<<temp) -1;
+    };
+    for i in 0..temp {
+        stream.stream.push((nb>>(temp-i-1))&1 != 0);
+    }
+    Ok((temp,stream))
+
+}
+
 fn main() -> Result<(), JpegError>{
 
     let args: Vec<String> = env::args().collect();
@@ -228,6 +252,12 @@ fn main() -> Result<(), JpegError>{
 
     let test = stream.to_byte();
     println!("{:08b}",test[0]);
+
+    let (mag, val) = magnitude_code(-6)?;
+    println!("{}",mag);
+    val.display();
+    stream.add_stream(val);
+    stream.display();
 
     Ok(())
 }
