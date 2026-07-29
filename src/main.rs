@@ -8,6 +8,10 @@ use std::io::Lines;
 use num_traits::Num;
 use num_traits::ToPrimitive;
 
+use crate::huffman::perform_huffman;
+
+mod huffman;
+
 
 #[derive(Debug)]
 enum JpegError {
@@ -15,6 +19,7 @@ enum JpegError {
     HelpError,
     ReadError,
     OutOfRange,
+    HuffmanError,
 }
 
 fn c_function(u: u8) -> f64 {
@@ -30,6 +35,7 @@ fn dct_cos(count: u8, i: u8) -> f64 {
     * f64::cos((2*(count%8)+1) as f64 *(i%8) as f64 *PI/16.0)
 }
 
+#[derive(Clone)]
 struct BitStream {
     stream: Vec<bool>,
 }
@@ -102,7 +108,11 @@ impl BitStream {
         }
     }
 
-    fn add_stream(&mut self, stream: BitStream) {
+    fn push_single(&mut self, val: bool){
+        self.stream.push(val);
+    }
+
+    fn add_stream(&mut self, stream: &BitStream) {
         stream.stream.iter().for_each(|b| self.stream.push(*b));
     }
 
@@ -285,14 +295,17 @@ fn main() -> Result<(), JpegError>{
     let (mag, val) = magnitude_code(-6,2047)?;
     println!("{}",mag);
     val.display();
-    stream.add_stream(val);
+    stream.add_stream(&val);
     stream.display();
 
     let enc = mcu_encoding(&blocs[0], 0)?;
-    for vec in enc {
+    for vec in &enc {
         print!("{:02x} ",vec.0);
         vec.1.display();
     }
+
+    let temp:Vec<u8> = enc.iter().map(|(s,_)|*s).collect();
+    let (huff_stream,deep,symbol) = perform_huffman(temp[1..].to_vec())?;
 
     Ok(())
 }
