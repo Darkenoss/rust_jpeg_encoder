@@ -7,7 +7,7 @@ pub struct HuffmanTree {
     zero: Option<Box<HuffmanTree>>,
     one: Option<Box<HuffmanTree>>,
     isleaf: bool,
-    pub val: u8,
+    val: u8,
     freq: u64,
     stream: Option<BitStream>,
 }

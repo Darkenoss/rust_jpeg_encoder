@@ -2,19 +2,22 @@ use std::env;
 use std::f64::consts::PI;
 use std::fmt::Display;
 use std::fs;
+use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Lines;
+use std::io::Write;
 use num_traits::Num;
 use num_traits::ToPrimitive;
 
-use crate::JpegError::HuffmanError;
 use crate::huffman::HuffmanTree;
 use crate::huffman::encode_single;
 use crate::huffman::perform_huffman;
 use crate::huffman::perform_huffman_no_encoding;
+use crate::jpeg_format::JpegFormat;
 
 mod huffman;
+mod jpeg_format;
 
 
 #[derive(Debug)]
@@ -125,7 +128,7 @@ impl BitStream {
         println!("");
     }
 
-    fn to_byte(&self) -> Vec<u8> {
+    fn to_byte(&self, stuffing: bool) -> Vec<u8> {
         let mut res = vec![];
         let mut nb: u8 = 0;
         let mut count:u8 = 0;
@@ -137,6 +140,9 @@ impl BitStream {
             count+=1;
             if count==8 {
                 res.push(nb);
+                if stuffing && nb==0xFF {
+                    res.push(0x00);
+                }
                 count = 0;
                 nb = 0;
             }
@@ -309,13 +315,15 @@ fn encode_data(data: &Vec<Vec<(u8, BitStream)>>,huff_dc: Vec<HuffmanTree>, huff_
                 })
         });
     if err {
-        Err(HuffmanError)
+        Err(JpegError::HuffmanError)
     } else {
         Ok(res)
     }
 }
 
 fn main() -> Result<(), JpegError>{
+
+    let mut jpeg_info = JpegFormat::new(8, 8,1,4,4);
 
     let args: Vec<String> = env::args().collect();
     let lines = parse_cmd(args)?;
@@ -338,11 +346,33 @@ fn main() -> Result<(), JpegError>{
     let datas = vec![enc];
     let (dc,ac) = huffman_separation(&datas);
 
+	println!("{:x?}\n{:x?}",dc,ac);
+
     let (huff_dc,deep_dc,symbol_dc) = perform_huffman_no_encoding(dc)?;
     let (huff_ac,deep_ac,symbol_ac) = perform_huffman_no_encoding(ac)?;
 
+	println!("{:x?}",symbol_ac);
+
     let coded_data = encode_data(&datas, huff_dc, huff_ac)?;
-    coded_data.display();
+
+	jpeg_info.data = coded_data;
+	jpeg_info.huff_deep_dc.push(deep_dc);
+	jpeg_info.huff_deep_ac.push(deep_ac);
+	jpeg_info.huff_symbol_dc.push(symbol_dc);
+	jpeg_info.huff_symbol_ac.push(symbol_ac);
+	jpeg_info.quant_table.push(quant.do_zigzag());
+
+	let bytestream = jpeg_info.create_jpeg_bytestream();
+
+	println!("{:x?}",bytestream);
+
+	let Ok(mut f) = File::create("test.jpg") else {
+		return Err(JpegError::FileError);
+	};
+
+	let Ok(_) = f.write_all(&bytestream.to_vec()) else {
+		return Err(JpegError::FileError);
+	};
 
     Ok(())
 }
