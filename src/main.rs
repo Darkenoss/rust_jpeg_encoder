@@ -8,7 +8,11 @@ use std::io::Lines;
 use num_traits::Num;
 use num_traits::ToPrimitive;
 
+use crate::JpegError::HuffmanError;
+use crate::huffman::HuffmanTree;
+use crate::huffman::encode_single;
 use crate::huffman::perform_huffman;
+use crate::huffman::perform_huffman_no_encoding;
 
 mod huffman;
 
@@ -269,6 +273,48 @@ fn mcu_encoding(mcu: &Vec<i16>, last_dc:i16) -> Result<Vec<(u8,BitStream)>,JpegE
     Ok(output)
 }
 
+fn huffman_separation(datas: &Vec<Vec<(u8,BitStream)>>) -> (Vec<u8>,Vec<u8>) {
+    let mut dc = vec![];
+    let mut ac = vec![];
+    datas.iter().for_each(|v|{
+        v.iter().enumerate().for_each(|(c,d)|{
+            if c == 0 {
+                dc.push(d.0);
+            } else {
+                ac.push(d.0);
+            }
+        });
+    });
+    (dc,ac)
+}
+
+fn encode_data(data: &Vec<Vec<(u8, BitStream)>>,huff_dc: Vec<HuffmanTree>, huff_ac: Vec<HuffmanTree>) -> Result<BitStream,JpegError> {
+    let mut res = BitStream{stream: vec![]};
+    let err = false;
+    data
+        .iter()
+        .for_each(|vec| {
+            vec
+                .iter()
+                .enumerate()
+                .for_each(|(c,val)| {
+                    let temp;
+                    if c == 0 {
+                        temp = encode_single(val.0, &huff_dc).unwrap();
+                    } else {
+                        temp = encode_single(val.0, &huff_ac).unwrap();
+                    };
+                    res.add_stream(&temp);
+                    res.add_stream(&val.1);
+                })
+        });
+    if err {
+        Err(HuffmanError)
+    } else {
+        Ok(res)
+    }
+}
+
 fn main() -> Result<(), JpegError>{
 
     let args: Vec<String> = env::args().collect();
@@ -283,29 +329,20 @@ fn main() -> Result<(), JpegError>{
     let blocs:Vec<Vec<i16>> = blocs.iter_mut().map(|b| b.do_zigzag()).collect();
     blocs[0].iter().for_each(|x|print!("{x} "));
 
-    let mut stream = BitStream {stream : vec![]};
-    stream.add(9);
-    stream.add(1);
-    stream.add(1);
-    stream.display();
-
-    let test = stream.to_byte();
-    println!("{:08b}",test[0]);
-
-    let (mag, val) = magnitude_code(-6,2047)?;
+    let (mag, val) = magnitude_code(78,2047)?;
     println!("{}",mag);
     val.display();
-    stream.add_stream(&val);
-    stream.display();
 
     let enc = mcu_encoding(&blocs[0], 0)?;
-    for vec in &enc {
-        print!("{:02x} ",vec.0);
-        vec.1.display();
-    }
 
-    let temp:Vec<u8> = enc.iter().map(|(s,_)|*s).collect();
-    let (huff_stream,deep,symbol) = perform_huffman(temp[1..].to_vec())?;
+    let datas = vec![enc];
+    let (dc,ac) = huffman_separation(&datas);
+
+    let (huff_dc,deep_dc,symbol_dc) = perform_huffman_no_encoding(dc)?;
+    let (huff_ac,deep_ac,symbol_ac) = perform_huffman_no_encoding(ac)?;
+
+    let coded_data = encode_data(&datas, huff_dc, huff_ac)?;
+    coded_data.display();
 
     Ok(())
 }

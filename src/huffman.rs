@@ -1,13 +1,13 @@
 use std::{collections::HashMap};
 
-use crate::{BitStream, JpegError};
+use crate::{BitStream, JpegError::{self, HuffmanError}};
 
 #[derive(Clone)]
 pub struct HuffmanTree {
     zero: Option<Box<HuffmanTree>>,
     one: Option<Box<HuffmanTree>>,
     isleaf: bool,
-    val: u8,
+    pub val: u8,
     freq: u64,
     stream: Option<BitStream>,
 }
@@ -61,9 +61,14 @@ fn construct_huff_table(mut nodes: Vec<HuffmanTree>) -> Result<HuffmanTree,JpegE
 
 fn prepare_jpeg_encoding(table: &mut HuffmanTree, stream: &mut BitStream, leafs: &mut Vec<HuffmanTree>, jpeg_deep: &mut [u8;16], jpeg_symbol: &mut [Vec<u8>;16]){
     if table.isleaf {
-        table.stream = Some(stream.clone());
+        let mut count = stream.stream.iter().count();
+        if count > 0 {
+            count-=1;
+            table.stream = Some(stream.clone());
+        } else {
+            table.stream = Some(BitStream { stream: vec![false] })
+        }
         leafs.push(table.clone());
-        let count = stream.stream.iter().count() - 1;
         jpeg_deep[count]+= 1;
         jpeg_symbol[count].push(table.val);
     } else {
@@ -92,6 +97,16 @@ fn encode_to_bistream(values: Vec<u8>, leafs: Vec<HuffmanTree>) -> Vec<BitStream
     stream
 }
 
+pub fn encode_single(val: u8, leafs: &Vec<HuffmanTree>) -> Result<BitStream,JpegError> {
+    let Some(code) = leafs.iter().find(|t| t.val==val) else {
+        return Err(HuffmanError);
+    };
+    let Some(code_stream) = &code.stream else {
+        return Err(HuffmanError);
+    };
+    Ok(code_stream.clone())
+}
+
 pub fn perform_huffman(values: Vec<u8>) -> Result<(Vec<BitStream>,[u8;16],[Vec<u8>;16]),JpegError>{
     let leafs = generate_freq_leafs(&values);
     let mut table = construct_huff_table(leafs)?;
@@ -101,6 +116,16 @@ pub fn perform_huffman(values: Vec<u8>) -> Result<(Vec<BitStream>,[u8;16],[Vec<u
     prepare_jpeg_encoding(&mut table, &mut BitStream { stream:vec![] }, &mut sleaf, &mut jpeg_deep, &mut jpeg_symbol);
     let stream = encode_to_bistream(values, sleaf);
     Ok((stream,jpeg_deep,jpeg_symbol))
+}
+
+pub fn perform_huffman_no_encoding(values: Vec<u8>) -> Result<(Vec<HuffmanTree>,[u8;16],[Vec<u8>;16]),JpegError>{
+    let leafs = generate_freq_leafs(&values);
+    let mut table = construct_huff_table(leafs)?;
+    let mut sleaf = vec![];
+    let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
+    let mut jpeg_deep = [0;16];
+    prepare_jpeg_encoding(&mut table, &mut BitStream { stream:vec![] }, &mut sleaf, &mut jpeg_deep, &mut jpeg_symbol);
+    Ok((sleaf,jpeg_deep,jpeg_symbol))
 }
 
 
