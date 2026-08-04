@@ -59,7 +59,7 @@ impl<T: num_traits::NumCast + Copy + Display + Num> Bloc<T> {
             res.data[i] = (self.data
                 .into_iter()
                 .fold(0.0_f64, |acc, x|{
-                    let res = acc + (x.to_f64().unwrap())*dct_cos(count,i as u8);
+                    let res = acc + (x.to_f64().unwrap()-128.0)*dct_cos(count,i as u8);
                     count+=1;
                     res})
                 * 0.25 * c_function(i as u8/8) * c_function(i as u8%8)) as i16;
@@ -331,7 +331,7 @@ fn main() -> Result<(), JpegError>{
     let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
     println!("{:x?}",blocs[0].data);
     blocs[0].display();
-    let quant = read_quant("quant/table".to_string())?;
+    let quant = read_quant("quant/one".to_string())?;
     quant.display();
     let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_quant(&quant)).collect();
     blocs[0].display();
