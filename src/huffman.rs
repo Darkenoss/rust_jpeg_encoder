@@ -176,15 +176,18 @@ use super::*;
 		let leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
 		let head = construct_huff_table(leafs).unwrap();
 		assert!(!head.isleaf);
+		let leaf0 = head.zero.unwrap();
+		assert!(leaf0.isleaf);
+		assert_eq!(leaf0.val,3);
 		let node1 = head.one.unwrap();
 		assert!(!node1.isleaf);
-		let leaf3 = head.zero.unwrap();
-		assert!(leaf3.isleaf);
-		assert_eq!(leaf3.val,3);
-		let leaf1 = node1.zero.unwrap();
-		assert_eq!(leaf1.val,1);
-		let leaf2 = node1.one.unwrap();
-		assert_eq!(leaf2.val,2);
+		let leaf10 = node1.zero.unwrap();
+		assert_eq!(leaf10.val,2);
+		let node11 = node1.one.unwrap();
+		let leaf110 = node11.zero.unwrap();
+		assert_eq!(leaf110.val,1);
+		let leaf_bad = node11.one.unwrap();
+		assert_eq!(leaf_bad.freq,0);
 	}
 
 	#[test]
@@ -197,14 +200,16 @@ use super::*;
 		assert_eq!(leaf3.stream.iter().count(),1);
 		assert!(!leaf3.stream[0]);
 		let node1 = head.one.unwrap();
-		let leaf1 = node1.zero.unwrap().stream.unwrap();
-		assert_eq!(leaf1.stream.iter().count(),2);
-		assert!(leaf1.stream[0]);
-		assert!(!leaf1.stream[1]);
-		let leaf2 = node1.one.unwrap().stream.unwrap();
-		assert_eq!(leaf2.stream.iter().count(),2);
-		assert!(leaf2.stream[0]);
-		assert!(leaf2.stream[1]);
+		let leaf10 = node1.zero.unwrap().stream.unwrap();
+		assert_eq!(leaf10.stream.iter().count(),2);
+		assert!(leaf10.stream[0]);
+		assert!(!leaf10.stream[1]);
+		let node11 = node1.one.unwrap();
+		let leaf110 = node11.zero.unwrap().stream.unwrap();
+		assert_eq!(leaf110.stream.iter().count(),3);
+		assert!(leaf110.stream[0]);
+		assert!(leaf110.stream[1]);
+		assert!(!leaf110.stream[2]);
 	}
 
 	#[test]
@@ -228,9 +233,10 @@ use super::*;
 			assert!(false);
 		}
 		if let Some(leaf2) = &sleaf[2].stream {
-			assert_eq!(leaf2.stream.iter().count(),2);
+			assert_eq!(leaf2.stream.iter().count(),3);
 			assert!(leaf2.stream[0]);
 			assert!(leaf2.stream[1]);
+			assert!(!leaf2.stream[2]);
 		} else {
 			assert!(false);
 		}
@@ -244,10 +250,11 @@ use super::*;
 		let mut jpeg_deep = [0;16];
 		prepare_jpeg_encoding(&mut head, &mut BitStream { stream:vec![] }, &mut vec![], &mut jpeg_deep, &mut jpeg_symbol);
 		assert_eq!(jpeg_deep[0],1);
-		assert_eq!(jpeg_deep[1],2);
+		assert_eq!(jpeg_deep[1],1);
+		assert_eq!(jpeg_deep[2],1);
 		assert_eq!(jpeg_symbol[0][0],3);
-		assert_eq!(jpeg_symbol[1][0],1);
-		assert_eq!(jpeg_symbol[1][1],2);
+		assert_eq!(jpeg_symbol[1][0],2);
+		assert_eq!(jpeg_symbol[2][0],1);
 	}
 
 	#[test]
@@ -258,9 +265,10 @@ use super::*;
 		let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
 		prepare_jpeg_encoding(&mut head, &mut BitStream { stream:vec![] }, &mut sleaf, &mut [0;16], &mut jpeg_symbol);
 		let res = _encode_to_bistream(vec![1,3,3], sleaf);
-		assert_eq!(res[0].stream.iter().count(),2);
+		assert_eq!(res[0].stream.iter().count(),3);
 		assert!(res[0].stream[0]);
-		assert!(!res[0].stream[1]);
+		assert!(res[0].stream[1]);
+		assert!(!res[0].stream[2]);
 		assert_eq!(res[1].stream.iter().count(),1);
 		assert!(!res[1].stream[0]);
 		assert_eq!(res[2].stream.iter().count(),1);
@@ -272,11 +280,12 @@ use super::*;
 		let (stream,deep,symbol) =  _perform_huffman(vec![2,2,3,1,1,3,2,3,3]).unwrap();
 		assert_eq!(stream[0].stream.iter().count(),2);
 		assert!(stream[0].stream[0]);
-		assert!(stream[0].stream[1]);
+		assert!(!stream[0].stream[1]);
 		assert_eq!(deep[0],1);
-		assert_eq!(deep[1],2);
+		assert_eq!(deep[1],1);
+		assert_eq!(deep[2],1);
 		assert_eq!(symbol[0][0],3);
-		assert_eq!(symbol[1][0],1);
-		assert_eq!(symbol[1][1],2);
+		assert_eq!(symbol[1][0],2);
+		assert_eq!(symbol[2][0],1);
 	}
 }
