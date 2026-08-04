@@ -97,7 +97,7 @@ impl JpegFormat {
 		self.huff_deep_ac.iter().enumerate().for_each(|(i,t)|{
 			marking(stream, 0xC4);
 			mark_size(stream, 19 + self.huff_symbol_ac[i].iter().fold(0, |acc,v|acc+v.iter().count()) as u16);
-			stream.push((1<<4)+1 as u8);
+			stream.push((1<<4)+i as u8);
 			t.iter().for_each(|b| stream.push(*b));
 			self.huff_symbol_ac[i].iter().for_each(|v|v.iter().for_each(|b| stream.push(*b)));
 		});
@@ -110,7 +110,7 @@ impl JpegFormat {
 
 		for i in 0..self.comp {
 			stream.push(i);
-			stream.push((i<<4) + 1);
+			stream.push((i<<4) + i);
 		}
 		stream.push(0x00);
 		stream.push(0x00);

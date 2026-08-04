@@ -10,10 +10,11 @@ pub struct HuffmanTree {
     val: u8,
     freq: u64,
     stream: Option<BitStream>,
+    weight: u16,
 }
 
 fn create_leaf(val: u8, freq: u64) -> HuffmanTree {
-    HuffmanTree { zero:None, one: None, isleaf: true, freq, val , stream: None}
+    HuffmanTree { zero:None, one: None, isleaf: true, freq, val , stream: None, weight: 1}
 }
 
 fn generate_freq_leafs(val: &Vec<u8>) -> Vec<HuffmanTree> {
@@ -28,6 +29,7 @@ fn generate_freq_leafs(val: &Vec<u8>) -> Vec<HuffmanTree> {
         .map(|(&value,&frequence)| create_leaf(value, frequence))
         .collect();
     res.sort_by_key(|h| -(h.freq as i64));
+    res.push(HuffmanTree { zero: None, one: None, isleaf: true, val: 0, freq: 0, stream: None, weight: 257 });
     res
 }
 
@@ -42,25 +44,35 @@ fn insert_sorted_huffman(nodes: &mut Vec<HuffmanTree>, elem: HuffmanTree) {
 
 fn construct_huff_table(mut nodes: Vec<HuffmanTree>) -> Result<HuffmanTree,JpegError> {
     while nodes.iter().count() != 1 {
-        let Some(left) = nodes.pop() else {
+        let Some(mut left) = nodes.pop() else {
             return Err(JpegError::HuffmanError)
         };
-        let Some(right) = nodes.pop() else {
+        let Some(mut right) = nodes.pop() else {
             return Err(JpegError::HuffmanError);
         };
+        if left.weight > right.weight {
+            let temp = left;
+            left = right;
+            right = temp;
+        }
+        let weight = left.weight+ right.weight;
         let freq = left.freq+right.freq;
         insert_sorted_huffman(&mut nodes, HuffmanTree { zero:Some(Box::new(left)),
                                                         one: Some(Box::new(right)),
                                                         isleaf: false,
                                                         val: 0,
                                                         freq,
-                                                        stream: None});
+                                                        stream: None,
+                                                        weight});
     };
     Ok(nodes[0].clone())
 }
 
 fn prepare_jpeg_encoding(table: &mut HuffmanTree, stream: &mut BitStream, leafs: &mut Vec<HuffmanTree>, jpeg_deep: &mut [u8;16], jpeg_symbol: &mut [Vec<u8>;16]){
     if table.isleaf {
+        if table.freq == 0 {
+            return;
+        }
         let mut count = stream.stream.iter().count();
         if count > 0 {
             count-=1;
@@ -137,7 +149,7 @@ use super::*;
 
     #[test]
     fn test_create_leaf() {
-        assert!(matches!(create_leaf(8, 11),HuffmanTree {zero:None, one: None, isleaf: true, freq: 11, val: 8, stream: None}))
+        assert!(matches!(create_leaf(8, 11),HuffmanTree {zero:None, one: None, isleaf: true, freq: 11, val: 8, stream: None, weight: 1}))
     }
 
     #[test]
@@ -153,9 +165,9 @@ use super::*;
     #[test]
     fn insert_sort() {
         let mut leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
-        insert_sorted_huffman(&mut leafs, HuffmanTree { zero:None, one: None, isleaf: true, val: 5, freq: 10, stream: None});
+        insert_sorted_huffman(&mut leafs, HuffmanTree { zero:None, one: None, isleaf: true, val: 5, freq: 10, stream: None, weight:1});
         assert_eq!(leafs[0].val,5);
-        insert_sorted_huffman(&mut leafs, HuffmanTree { zero:None, one: None, isleaf: true, val: 6, freq: 0, stream: None });
+        insert_sorted_huffman(&mut leafs, HuffmanTree { zero:None, one: None, isleaf: true, val: 6, freq: 0, stream: None, weight:1});
         assert_eq!(leafs[4].val,6);
     }
 

@@ -329,6 +329,7 @@ fn main() -> Result<(), JpegError>{
     let lines = parse_cmd(args)?;
     let mut blocs = parse_bloc_line(lines, 1)?;
     let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
+    println!("{:x?}",blocs[0].data);
     blocs[0].display();
     let quant = read_quant("quant/table".to_string())?;
     quant.display();
