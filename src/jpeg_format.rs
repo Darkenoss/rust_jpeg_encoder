@@ -3,17 +3,19 @@ use crate::BitStream;
 
 #[derive(Clone)]
 pub struct JpegFormat {
-	sizex: u16,
-	sizey: u16,
+	pub sizex: u16,
+	pub sizey: u16,
 	pub huff_deep_ac: Vec<[u8;16]>,
 	pub huff_symbol_ac : Vec<[Vec<u8>;16]>,
 	pub huff_deep_dc: Vec<[u8;16]>,
 	pub huff_symbol_dc : Vec<[Vec<u8>;16]>,
 	pub data: BitStream,
-	comp: u8,
-	x_sampling: u8,
-	y_sampling: u8,
+	pub comp: u8,
+	pub x_sampling: u8,
+	pub y_sampling: u8,
 	pub quant_table: Vec<Vec<u8>>,
+	pub bsizex: u16,
+	pub bsizey: u16,
 }
 
 fn marking(stream: &mut Vec<u8>, mark: u8) {
@@ -38,7 +40,10 @@ impl JpegFormat {
 				huff_deep_dc: vec![],
 				huff_symbol_dc: vec![],
 				data: BitStream { stream:vec![] },
-				quant_table: vec![] }
+				quant_table: vec![],
+				bsizex: (sizex+7)/8,
+				bsizey: (sizey+7)/8,
+			}
 	}
 
 	fn jfif_bytestream(&self, stream: &mut Vec<u8>) {
