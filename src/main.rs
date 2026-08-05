@@ -5,12 +5,14 @@ use std::fs;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Lines;
+use std::io::Read;
 use std::io::Write;
 use std::num::ParseIntError;
+use std::io::Bytes;
+use std::str::from_utf8;
 use num_traits::Num;
 use num_traits::ToPrimitive;
-
+use std::str::Utf8Error;
 use crate::ImageFormat::PixMap;
 use crate::huffman::HuffmanTree;
 use crate::huffman::encode_single;
@@ -19,6 +21,8 @@ use crate::jpeg_format::JpegFormat;
 
 mod huffman;
 mod jpeg_format;
+
+const LF: u8 = 0x0A;
 
 
 #[derive(Debug)]
@@ -40,6 +44,12 @@ impl From<std::io::Error> for JpegError {
 
 impl From<ParseIntError> for JpegError {
 	fn from(_: ParseIntError) -> Self {
+		JpegError::ParseError
+	}
+}
+
+impl From<Utf8Error> for JpegError {
+	fn from(_: Utf8Error) -> Self {
 		JpegError::ParseError
 	}
 }
@@ -66,6 +76,38 @@ fn c_function(u: u8) -> f64 {
 fn dct_cos(count: u8, i: u8) -> f64 {
 	f64::cos((2*(count/8)+1) as f64 *(i/8) as f64 *PI/16.0)
 	* f64::cos((2*(count%8)+1) as f64 *(i%8) as f64 *PI/16.0)
+}
+
+struct FileReader {
+	file: Bytes<File>,
+}
+
+impl FileReader {
+	fn new(file: Bytes<File>) -> Self {
+		FileReader { file }
+	}
+
+	fn next_line_as_bytes(&mut self) -> Result<Vec<u8>,JpegError> {
+		let line: Result<Vec<u8>, std::io::Error> = self.file.by_ref()
+			.take_while(|b| {
+				if let Ok(c) = b {
+					if *c == LF {
+						false
+					} else {
+						true
+					}
+				} else {
+					false
+				}
+			}).collect();
+		Ok(line?)
+	}
+
+	fn next_line_as_str(&mut self) -> Result<String,JpegError> {
+		let byte_line = self.next_line_as_bytes()?;
+		let line = from_utf8(&byte_line)?;
+		Ok(line.to_string())
+	}
 }
 
 #[derive(Clone)]
@@ -198,13 +240,13 @@ fn parse_format(name: &String) -> Result<ImageFormat,JpegError> {
 	}
 }
 
-fn parse_cmd(args: &Vec<String>) -> Result<(Lines<BufReader<fs::File>>,ImageFormat), JpegError> {
+fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,ImageFormat), JpegError> {
 	match args.len() {
 		3 => {
 			if args[1].eq("-f") {
 				let img_format = parse_format(&args[2])?;
-				let file = fs::File::open(&args[2])?;
-				Ok((BufReader::new(file).lines(),img_format))
+				let file= fs::File::open(&args[2])?.bytes();
+				Ok((FileReader::new(file),img_format))
 			} else {
 				Err(help(&args[0]))
 			}
@@ -215,12 +257,12 @@ fn parse_cmd(args: &Vec<String>) -> Result<(Lines<BufReader<fs::File>>,ImageForm
 	}
 }
 
-fn parse_pixmap_header(lines: &mut Lines<BufReader<fs::File>>) -> Result<JpegFileFormat,JpegError> {
+fn parse_pixmap_header(lines: &mut FileReader) -> Result<JpegFileFormat,JpegError> {
 	let mut file_format = JpegFileFormat {iscolor: false, isbyte: false, max: 0, sizex: 0, sizey: 0};
-	let mut pix_type = lines.next().ok_or(JpegError::FileError)??;
+	let mut pix_type = lines.next_line_as_str()?;
 
 	while pix_type[0..1] == *"#" {
-		pix_type = lines.next().ok_or(JpegError::FileError)??;
+		pix_type = lines.next_line_as_str()?;
 	}
 
 	match pix_type.as_str() {
@@ -235,14 +277,14 @@ fn parse_pixmap_header(lines: &mut Lines<BufReader<fs::File>>) -> Result<JpegFil
 		"P6" => {
 			file_format.isbyte = true;
 			file_format.isbyte = true;
-		}
+		},
 		_ => return Err(JpegError::FormatError),
 	}
 
-	let mut size_line = lines.next().ok_or(JpegError::FileError)??;
+	let mut size_line = lines.next_line_as_str()?;
 
 	while size_line[0..1] == *"#" {
-		size_line = lines.next().ok_or(JpegError::FileError)??;
+		size_line = lines.next_line_as_str()?;
 	}
 
 
@@ -253,11 +295,11 @@ fn parse_pixmap_header(lines: &mut Lines<BufReader<fs::File>>) -> Result<JpegFil
 	file_format.sizey = size_val.nth(0).ok_or(JpegError::FormatError)?.parse()?;
 
 	if file_format.max != 1 {
-		let mut max = lines.next().ok_or(JpegError::FileError)??;
+		let mut max = lines.next_line_as_str()?;
 
 
 		while max[0..1] == *"#" {
-			max = lines.next().ok_or(JpegError::FileError)??;
+			max = lines.next_line_as_str()?;
 		}
 
 		file_format.max = max.parse()?;
@@ -266,18 +308,18 @@ fn parse_pixmap_header(lines: &mut Lines<BufReader<fs::File>>) -> Result<JpegFil
 	Ok(file_format)
 }
 
-fn parse_file_header(img_format: ImageFormat, lines: &mut Lines<BufReader<fs::File>>) -> Result<JpegFileFormat,JpegError> {
+fn parse_file_header(img_format: ImageFormat, lines: &mut FileReader) -> Result<JpegFileFormat,JpegError> {
 	match img_format {
 		PixMap => parse_pixmap_header(lines)
 	}
 }
 
-fn parse_bloc_line(lines: &mut Lines<BufReader<fs::File>>, file_format: JpegFileFormat) -> Result<Vec<Bloc<u8>>, JpegError> {
+fn parse_bloc_line(lines: &mut FileReader, file_format: JpegFileFormat) -> Result<Vec<Bloc<u8>>, JpegError> {
 	let mut blocs: Vec<Bloc<u8>> = Vec::new();
 	for _ in  0..(file_format.sizex/8 +file_format.sizex%8) { blocs.push(Bloc { data: [0;64] }); };
 
 	for bline in 0..8 {
-		let line = lines.next().ok_or(JpegError::ReadError)??;
+		let line = lines.next_line_as_str()?;
 		let mut errors = false;
 		line
 			.split(" ")
