@@ -198,7 +198,7 @@ fn parse_format(name: &String) -> Result<ImageFormat,JpegError> {
 	}
 }
 
-fn parse_cmd(args: Vec<String>) -> Result<(Lines<BufReader<fs::File>>,ImageFormat), JpegError> {
+fn parse_cmd(args: &Vec<String>) -> Result<(Lines<BufReader<fs::File>>,ImageFormat), JpegError> {
 	match args.len() {
 		3 => {
 			if args[1].eq("-f") {
@@ -413,7 +413,7 @@ fn encode_data(data: &Vec<Vec<(u8, BitStream)>>,huff_dc: Vec<HuffmanTree>, huff_
 fn main() -> Result<(), JpegError>{
 
 	let args: Vec<String> = env::args().collect();
-	let (mut lines, img_format) = parse_cmd(args)?;
+	let (mut lines, img_format) = parse_cmd(&args)?;
 	let file_format = parse_file_header(img_format, &mut lines)?;
 	let mut comp = 1;
 	if file_format.iscolor {
@@ -460,13 +460,12 @@ fn main() -> Result<(), JpegError>{
 
 	println!("{:x?}",bytestream);
 
-	let Ok(mut f) = File::create("test.jpg") else {
-		return Err(JpegError::FileError);
-	};
+	let mut output = args[2][..&args[2].len()-3].to_string();
+	output.push_str("jpg");
 
-	let Ok(_) = f.write_all(&bytestream.to_vec()) else {
-		return Err(JpegError::FileError);
-	};
+	let mut f = File::create(output)?;
+
+	f.write_all(&bytestream.to_vec())?;
 
 	Ok(())
 }
