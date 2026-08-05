@@ -23,6 +23,8 @@ mod huffman;
 mod jpeg_format;
 
 const LF: u8 = 0x0A;
+const TAB: u8 = 0x09;
+const SP: u8 = 0x20;
 
 
 #[derive(Debug)]
@@ -108,6 +110,27 @@ impl FileReader {
 		let line = from_utf8(&byte_line)?;
 		Ok(line.to_string())
 	}
+
+	fn next_separator_as_str(&mut self) -> Result<(String,u8),JpegError> {
+		let mut sep = 0;
+		let part_byte: Result<Vec<u8>, std::io::Error> = self.file.by_ref()
+			.take_while(|b| {
+				if let Ok(c) = b {
+					if *c == LF || *c == TAB || *c == SP {
+						sep = *c;
+						false
+					} else {
+						true
+					}
+				} else {
+					false
+				}
+			}).collect();
+		let part_byte = part_byte?;
+		let part = from_utf8(&part_byte)?;
+		Ok((part.to_string(),sep))
+	}
+
 }
 
 #[derive(Clone)]
@@ -257,13 +280,21 @@ fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,ImageFormat), JpegError> 
 	}
 }
 
+fn parse_pixmap_comment(lines: &mut FileReader) -> Result<String, JpegError> {
+	let (mut data,mut sep) = lines.next_separator_as_str()?;
+
+	while data[0..1] == *"#" {
+		if sep != LF {
+			lines.next_line_as_str()?;
+		}
+		(data, sep) = lines.next_separator_as_str()?;
+	}
+	Ok(data)
+}
+
 fn parse_pixmap_header(lines: &mut FileReader) -> Result<JpegFileFormat,JpegError> {
 	let mut file_format = JpegFileFormat {iscolor: false, isbyte: false, max: 0, sizex: 0, sizey: 0};
-	let mut pix_type = lines.next_line_as_str()?;
-
-	while pix_type[0..1] == *"#" {
-		pix_type = lines.next_line_as_str()?;
-	}
+	let pix_type = parse_pixmap_comment(lines)?;
 
 	match pix_type.as_str() {
 		"P1" => file_format.max = 1,
@@ -281,27 +312,14 @@ fn parse_pixmap_header(lines: &mut FileReader) -> Result<JpegFileFormat,JpegErro
 		_ => return Err(JpegError::FormatError),
 	}
 
-	let mut size_line = lines.next_line_as_str()?;
+	let sizex = parse_pixmap_comment(lines)?;
+	file_format.sizex = sizex.parse()?;
 
-	while size_line[0..1] == *"#" {
-		size_line = lines.next_line_as_str()?;
-	}
-
-
-	let mut size_val = size_line.split(" ");
-
-
-	file_format.sizex = size_val.nth(0).ok_or(JpegError::FormatError)?.parse()?;
-	file_format.sizey = size_val.nth(0).ok_or(JpegError::FormatError)?.parse()?;
+	let sizey = parse_pixmap_comment(lines)?;
+	file_format.sizey = sizey.parse()?;
 
 	if file_format.max != 1 {
-		let mut max = lines.next_line_as_str()?;
-
-
-		while max[0..1] == *"#" {
-			max = lines.next_line_as_str()?;
-		}
-
+		let max= parse_pixmap_comment(lines)?;
 		file_format.max = max.parse()?;
 	}
 
