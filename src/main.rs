@@ -8,12 +8,11 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::num::ParseIntError;
-use std::io::Bytes;
-use std::str::from_utf8;
 use num_traits::Num;
 use num_traits::ToPrimitive;
 use std::str::Utf8Error;
-use crate::ImageFormat::PixMap;
+use crate::file_reader::FileReader;
+use crate::file_reader::parse_file;
 use crate::huffman::HuffmanTree;
 use crate::huffman::encode_single;
 use crate::huffman::perform_huffman_no_encoding;
@@ -21,11 +20,7 @@ use crate::jpeg_format::JpegFormat;
 
 mod huffman;
 mod jpeg_format;
-
-const LF: u8 = 0x0A;
-const TAB: u8 = 0x09;
-const SP: u8 = 0x20;
-
+mod file_reader;
 
 #[derive(Debug)]
 enum JpegError {
@@ -73,58 +68,6 @@ fn dct_cos(count: u8, i: u8) -> f64 {
 	* f64::cos((2*(count%8)+1) as f64 *(i%8) as f64 *PI/16.0)
 }
 
-struct FileReader {
-	file: Bytes<File>,
-}
-
-impl FileReader {
-	fn new(file: Bytes<File>) -> Self {
-		FileReader { file }
-	}
-
-	fn next_line_as_bytes(&mut self) -> Result<Vec<u8>,JpegError> {
-		let line: Result<Vec<u8>, std::io::Error> = self.file.by_ref()
-			.take_while(|b| {
-				if let Ok(c) = b {
-					if *c == LF {
-						false
-					} else {
-						true
-					}
-				} else {
-					false
-				}
-			}).collect();
-		Ok(line?)
-	}
-
-	fn next_line_as_str(&mut self) -> Result<String,JpegError> {
-		let byte_line = self.next_line_as_bytes()?;
-		let line = from_utf8(&byte_line)?;
-		Ok(line.to_string())
-	}
-
-	fn next_separator_as_str(&mut self) -> Result<(String,u8),JpegError> {
-		let mut sep = 0;
-		let part_byte: Result<Vec<u8>, std::io::Error> = self.file.by_ref()
-			.take_while(|b| {
-				if let Ok(c) = b {
-					if *c == LF || *c == TAB || *c == SP {
-						sep = *c;
-						false
-					} else {
-						true
-					}
-				} else {
-					false
-				}
-			}).collect();
-		let part_byte = part_byte?;
-		let part = from_utf8(&part_byte)?;
-		Ok((part.to_string(),sep))
-	}
-
-}
 
 #[derive(Clone)]
 struct BitStream {
@@ -273,105 +216,6 @@ fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,ImageFormat), JpegError> 
 	}
 }
 
-fn parse_pixmap_comment(lines: &mut FileReader) -> Result<String, JpegError> {
-	let (mut data,mut sep) = lines.next_separator_as_str()?;
-
-	while data[0..1] == *"#" {
-		if sep != LF {
-			lines.next_line_as_str()?;
-		}
-		(data, sep) = lines.next_separator_as_str()?;
-	}
-	Ok(data)
-}
-
-fn parse_pixmap_comment_line(lines: &mut FileReader) -> Result<String, JpegError> {
-	let mut data = lines.next_line_as_str()?;
-
-	while data.len()!=0 && data[0..1] == *"#" {
-		data = lines.next_line_as_str()?;
-	}
-	Ok(data)
-}
-
-fn parse_pixmap_comment_byte(lines: &mut FileReader) -> Result<Vec<u8>, JpegError> {
-	let mut data = lines.next_line_as_bytes()?;
-
-	while data.iter().count()!= 0 && data[0] == 0x23 {
-		data = lines.next_line_as_bytes()?;
-	}
-	Ok(data)
-}
-
-fn parse_pixmap_header(lines: &mut FileReader) -> Result<(JpegFormat,Vec<u8>),JpegError> {
-	let mut comp = 1;
-	let pix_type = parse_pixmap_comment(lines)?;
-	let mut max: u8 = 0;
-	let mut isbyte = false;
-
-	match pix_type.as_str() {
-		"P1" => max = 1,
-		"P4" => {
-			max = 1;
-			isbyte = true;
-		},
-		"P2" => isbyte = false,
-		"P5" => isbyte = true,
-		"P3" => comp = 3,
-		"P6" => {
-			isbyte = true;
-			comp = 3;
-		},
-		_ => return Err(JpegError::FormatError),
-	}
-
-	let sizex_str = parse_pixmap_comment(lines)?;
-	let sizex = sizex_str.parse::<u16>()?;
-
-	let sizey_str = parse_pixmap_comment(lines)?;
-	let sizey = sizey_str.parse::<u16>()?;
-
-	if max != 1 {
-		let max_str= parse_pixmap_comment(lines)?;
-		max = max_str.parse::<u8>()?;
-	}
-
-	let mut data: Vec<u8> = vec![];
-
-	if isbyte {
-		let mut new_line = parse_pixmap_comment_byte(lines)?;
-		while new_line.iter().count()!= 0 {
-			new_line = new_line.iter().map(|b|(*b)*(255/max)).collect();
-			data.append(&mut new_line);
-			new_line = parse_pixmap_comment_byte(lines)?;
-		}
-	} else {
-		let mut new_line = parse_pixmap_comment_line(lines)?;
-		let mut error = false;
-		while new_line.len() != 0 {
-			new_line
-				.split(" ")
-				.map(|s|s.parse::<u8>())
-				.filter_map(|r| r.map_err(|_|error=true).ok())
-				.for_each(|b|data.push(b*(255/max)));
-			if error {
-				return Err(JpegError::FormatError);
-			}
-			new_line = parse_pixmap_comment_line(lines)?;
-		}
-	}
-
-	let file_format = JpegFormat::new(sizex, sizey, comp, 4, 4);
-
-	Ok((file_format,data))
-}
-
-fn parse_file_header(img_format: ImageFormat, lines: &mut FileReader) -> Result<(JpegFormat,Vec<u8>),JpegError> {
-	match img_format {
-		PixMap => parse_pixmap_header(lines)
-	}
-}
-
 fn parse_bloc_line(lines: Vec<u8>, file_format: &JpegFormat) -> Result<Vec<Bloc<u8>>, JpegError> {
 	let mut blocs: Vec<Bloc<u8>> = Vec::new();
 	for _ in  0..(file_format.bsizex*file_format.bsizey) {
@@ -510,7 +354,7 @@ fn main() -> Result<(), JpegError>{
 
 	let args: Vec<String> = env::args().collect();
 	let (mut lines, img_format) = parse_cmd(&args)?;
-	let (mut jpeg_info,data) = parse_file_header(img_format, &mut lines)?;
+	let (mut jpeg_info,data) = parse_file(img_format, &mut lines)?;
 
 	println!("{:?}",data);
 	let mut blocs = parse_bloc_line(data, &jpeg_info)?;
