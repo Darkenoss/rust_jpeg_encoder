@@ -279,7 +279,7 @@ fn magnitude_code(mut nb: i16, max: i16) -> Result<(u8, BitStream),JpegError> {
 
 }
 
-fn mcu_encoding(mcu: &Vec<i16>, last_dc:i16) -> Result<Vec<(u8,BitStream)>,JpegError> {
+fn single_mcu_encoding(mcu: &Vec<i16>, last_dc:i16) -> Result<Vec<(u8,BitStream)>,JpegError> {
 	let mut output:Vec<(u8,BitStream)> = vec![];
 	let mut count =0;
 	let mut last = 0;
@@ -306,6 +306,16 @@ fn mcu_encoding(mcu: &Vec<i16>, last_dc:i16) -> Result<Vec<(u8,BitStream)>,JpegE
 		output.push((0x00,BitStream{stream: vec![]}));
 	}
 	Ok(output)
+}
+
+fn mcu_encoding(data: Vec<Vec<i16>>) -> Result<Vec<Vec<(u8,BitStream)>>,JpegError> {
+	let mut last_dc = 0;
+	data.iter()
+		.map(|mcu| {
+			let res = single_mcu_encoding(mcu, last_dc);
+			last_dc = mcu[0];
+			res
+		}).collect()
 }
 
 fn huffman_separation(datas: &Vec<Vec<(u8,BitStream)>>) -> (Vec<u8>,Vec<u8>) {
@@ -374,9 +384,7 @@ fn main() -> Result<(), JpegError>{
 	println!("{}",mag);
 	val.display();
 
-	let enc = mcu_encoding(&blocs[0], 0)?;
-
-	let datas = vec![enc];
+	let datas = mcu_encoding(blocs)?;
 	let (dc,ac) = huffman_separation(&datas);
 
 	println!("{:x?}\n{:x?}",dc,ac);
