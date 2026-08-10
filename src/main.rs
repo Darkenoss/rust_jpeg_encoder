@@ -8,9 +8,11 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::num::ParseIntError;
+use std::str::FromStr;
 use num_traits::Num;
 use num_traits::ToPrimitive;
 use std::str::Utf8Error;
+use crate::ImageFormat::PixMap;
 use crate::file_reader::FileReader;
 use crate::file_reader::parse_file;
 use crate::huffman::HuffmanTree;
@@ -53,6 +55,18 @@ impl From<Utf8Error> for JpegError {
 
 enum ImageFormat {
 	PixMap,
+}
+
+struct CmdArgs {
+	format: ImageFormat,
+	debug: bool,
+	quant: String,
+}
+
+impl CmdArgs {
+	fn new() -> Self {
+		CmdArgs { format:PixMap, debug: false, quant: "quant/one".to_string() }
+	}
 }
 
 fn c_function(u: u8) -> f64 {
@@ -212,20 +226,44 @@ fn parse_format(name: &String) -> Result<ImageFormat,JpegError> {
 	}
 }
 
-fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,ImageFormat), JpegError> {
-	match args.len() {
-		3 => {
-			if args[1].eq("-f") {
-				let img_format = parse_format(&args[2])?;
-				let file= fs::File::open(&args[2])?.bytes();
-				Ok((FileReader::new(file),img_format))
-			} else {
-				Err(help(&args[0]))
+fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,CmdArgs), JpegError> {
+	let mut args = args.iter();
+	let Some(command) = args.next() else {
+		return Err(help(&"".to_string()));
+	};
+
+	let mut cmd_res = CmdArgs::new();
+	let mut file = String::from("");
+
+	while let Some(cmd)= args.next() {
+		match cmd.as_str() {
+			"-f" => {
+				if let Some(path) = args.next() {
+					cmd_res.format = parse_format(path)?;
+					file = path.clone();
+				} else {
+					return Err(help(&command))
+				}
 			}
-		},
-		_ => {
-			Err(help(&args[0]))
-		},
+			"-d" => {
+				cmd_res.debug = true;
+			}
+			"-q" => {
+				if let Some(quant) = args.next() {
+					cmd_res.quant = quant.clone();
+				} else {
+					return Err(help(&command))
+				}
+			}
+			_ => return Err(help(&command))
+		};
+	};
+
+	if file == "" {
+		return Err(help(&command));
+	} else {
+		let file= fs::File::open(file)?.bytes();
+		Ok((FileReader::new(file),cmd_res))
 	}
 }
 
@@ -376,41 +414,56 @@ fn encode_data(data: &Vec<Vec<(u8, BitStream)>>,huff_dc: Vec<HuffmanTree>, huff_
 fn main() -> Result<(), JpegError>{
 
 	let args: Vec<String> = env::args().collect();
-	let (mut lines, img_format) = parse_cmd(&args)?;
-	let (mut jpeg_info,data) = parse_file(img_format, &mut lines)?;
+	let (mut lines, cmd_res) = parse_cmd(&args)?;
+	let (mut jpeg_info,data) = parse_file(cmd_res.format, &mut lines)?;
 
-	println!("{:?}",data);
+	if cmd_res.debug {
+		println!("{:?}",data);
+	}
+
+
 	let mut blocs = parse_bloc_line(data, &jpeg_info)?;
 
-	println!("{:x?}",blocs[0].data);
+	if cmd_res.debug {
+		println!("{:x?}",blocs[0].data);
+	}
 	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
-	println!("{:x?}",blocs[0].data);
-	blocs[0].display();
-	let quant = read_quant("quant/table".to_string())?;
-	quant.display();
-	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_quant(&quant)).collect();
-	blocs[0].display();
-	let blocs:Vec<Vec<i16>> = blocs.iter_mut().map(|b| b.do_zigzag()).collect();
-	blocs[0].iter().for_each(|x|print!("{x} "));
 
-	let (mag, val) = magnitude_code(78,2047)?;
-	println!("{}",mag);
-	val.display();
+	if cmd_res.debug {
+		println!("{:x?}",blocs[0].data);
+		blocs[0].display();
+	}
+
+	let quant = read_quant(cmd_res.quant.to_string())?;
+	if cmd_res.debug {
+		quant.display();
+	}
+
+	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_quant(&quant)).collect();
+	if cmd_res.debug {
+		blocs[0].display();
+	}
+	let blocs:Vec<Vec<i16>> = blocs.iter_mut().map(|b| b.do_zigzag()).collect();
+	if cmd_res.debug {
+		blocs[0].iter().for_each(|x|print!("{x} "))
+	}
 
 	let datas = mcu_encoding(blocs)?;
 	let (dc,ac) = huffman_separation(&datas);
 
-	println!("{:x?}\n{:x?}",dc,ac);
+	if cmd_res.debug {
+		println!("{:x?}\n{:x?}",dc,ac);
+	}
 
 	let (huff_dc,deep_dc,symbol_dc) = perform_huffman_no_encoding(dc)?;
 	let (huff_ac,deep_ac,symbol_ac) = perform_huffman_no_encoding(ac)?;
 
-	println!("{:x?}",symbol_ac);
-
-	let temp = huff_ac.clone();
-
-	for tree in temp {
-		println!("{:x},{},{:?}",tree.val, tree.freq, tree.stream.unwrap().stream);
+	if cmd_res.debug {
+		println!("{:x?}",symbol_ac);
+		let temp = huff_ac.clone();
+		for tree in temp {
+			println!("{:x},{},{:?}",tree.val, tree.freq, tree.stream.unwrap().stream);
+		}
 	}
 
 	let coded_data = encode_data(&datas, huff_dc, huff_ac)?;
@@ -424,14 +477,18 @@ fn main() -> Result<(), JpegError>{
 
 	let bytestream = jpeg_info.create_jpeg_bytestream();
 
-	println!("{:x?}",bytestream);
+	if cmd_res.debug {
+		println!("{:x?}",bytestream);
+	}
 
 	let mut output = args[2][..&args[2].len()-3].to_string();
 	output.push_str("jpg");
+	let print_output = output.clone();
 
 	let mut f = File::create(output)?;
 
 	f.write_all(&bytestream.to_vec())?;
+	println!("Jpeg image sucessfully created : {}",print_output);
 
 	Ok(())
 }
