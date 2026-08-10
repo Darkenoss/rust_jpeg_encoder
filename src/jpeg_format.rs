@@ -118,7 +118,7 @@ impl JpegFormat {
 			stream.push((i<<4) + i);
 		}
 		stream.push(0x00);
-		stream.push(0x00);
+		stream.push(0x3F);
 		stream.push(0x00);
 
 		self.data.to_byte(true).iter().for_each(|b| stream.push(*b));

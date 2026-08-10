@@ -136,6 +136,19 @@ impl<T: num_traits::NumCast + Copy + Display + Num> Bloc<T> {
 }
 
 impl BitStream {
+	fn new(mut val: u8, size: usize) -> Self {
+		let mut stream = vec![];
+		let mut count = 0;
+		while val!=0 && count<size {
+			stream.push((val&1) != 0);
+			val >>=1;
+			count += 1;
+		}
+		for _ in 0..(size-count) {stream.push(false);}
+		stream.reverse();
+		BitStream {stream}
+	}
+
 	fn _add(&mut self, mut nb: u16) {
 		while nb != 0 {
 			self.stream.push((nb & 1) != 0);
@@ -373,7 +386,7 @@ fn main() -> Result<(), JpegError>{
 	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
 	println!("{:x?}",blocs[0].data);
 	blocs[0].display();
-	let quant = read_quant("quant/one".to_string())?;
+	let quant = read_quant("quant/table".to_string())?;
 	quant.display();
 	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_quant(&quant)).collect();
 	blocs[0].display();
@@ -393,6 +406,12 @@ fn main() -> Result<(), JpegError>{
 	let (huff_ac,deep_ac,symbol_ac) = perform_huffman_no_encoding(ac)?;
 
 	println!("{:x?}",symbol_ac);
+
+	let temp = huff_ac.clone();
+
+	for tree in temp {
+		println!("{:x},{},{:?}",tree.val, tree.freq, tree.stream.unwrap().stream);
+	}
 
 	let coded_data = encode_data(&datas, huff_dc, huff_ac)?;
 
