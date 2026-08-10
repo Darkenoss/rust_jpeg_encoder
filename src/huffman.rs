@@ -114,7 +114,7 @@ fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], jpeg_deep: [u8;16]) {
 	for i in 0..16 {
 		for sym in 0..jpeg_deep[i] {
 			if i!=last_size {
-				code <<= 1;
+				code <<= i-last_size;
 				last_size = i;
 			}
 			sleaf[i][sym as usize].stream = Some(BitStream::new(code, i+1));
