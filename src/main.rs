@@ -8,7 +8,6 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::num::ParseIntError;
-use std::str::FromStr;
 use num_traits::Num;
 use num_traits::ToPrimitive;
 use std::str::Utf8Error;
@@ -88,6 +87,7 @@ struct BitStream {
 	stream: Vec<bool>,
 }
 
+#[derive(Clone)]
 struct Bloc<T: num_traits::NumCast + Copy + Display + Num> {
 	data: [T; 64],
 }
@@ -269,19 +269,55 @@ fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,CmdArgs), JpegError> {
 
 fn parse_bloc_line(lines: Vec<u8>, file_format: &JpegFormat) -> Result<Vec<Bloc<u8>>, JpegError> {
 	let mut blocs: Vec<Bloc<u8>> = Vec::new();
-	for _ in  0..(file_format.bsizex*file_format.bsizey) {
+	for _ in  0..(file_format.bsizex*file_format.bsizey*(file_format.comp as u16)) {
 		blocs.push(Bloc { data: [0;64] });
 	};
 
 	let mut count = 0;
 	for y in 0..file_format.sizey {
 		for x in 0..file_format.sizex {
-			blocs[(x/8 +(y/8)*file_format.bsizex) as usize].data[(x%8 + (y%8)*8) as usize] = lines[count];
-			count+=1;
+			for c in 0..file_format.comp as u16 {
+				blocs[((x/8 +(y/8)*file_format.bsizex)*file_format.comp as u16 + c) as usize]
+					.data[(x%8 + (y%8)*8) as usize] = lines[count];
+				count+=1;
+			}
 		}
 	}
 
 	Ok(blocs)
+}
+
+fn rgb_to_ycbcr(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    let r = r as f64;
+    let g = g as f64;
+    let b = b as f64;
+
+    (
+        (0.229 * r + 0.587 * g + 0.114 * b).round().clamp(0.0, 255.0) as u8,
+        (-0.1687 * r - 0.3313 * g + 0.5 * b + 128.0).round().clamp(0.0, 255.0) as u8,
+        (0.5 * r - 0.4187 * g - 0.0813 * b + 128.0).round().clamp(0.0, 255.0) as u8,
+    )
+}
+
+fn to_luminance(blocs: &mut Vec<Bloc<u8>>) {
+	for bloc in (0..blocs.len()).step_by(3) {
+		let r = blocs[bloc].clone();
+		let g = blocs[bloc + 1].clone();
+		let b = blocs[bloc + 2].clone();
+
+		let mut y = Bloc { data: [0; 64] };
+		let mut cb = Bloc { data: [0; 64] };
+		let mut cr = Bloc { data: [0; 64] };
+
+		for i in 0..64 {
+			(y.data[i], cb.data[i], cr.data[i]) =
+				rgb_to_ycbcr(r.data[i], g.data[i], b.data[i]);
+		}
+
+		blocs[bloc] = y;
+		blocs[bloc + 1] = cb;
+		blocs[bloc + 2] = cr;
+		}
 }
 
 fn read_quant(s: String) -> Result<Bloc<u8>,JpegError> {
@@ -427,6 +463,14 @@ fn main() -> Result<(), JpegError>{
 	if cmd_res.debug {
 		println!("{:x?}",blocs[0].data);
 	}
+
+	if jpeg_info.comp == 3 {
+		to_luminance(&mut blocs);
+		if cmd_res.debug {
+			println!("{:x?}",blocs[2].data);
+		}
+	}
+
 	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
 
 	if cmd_res.debug {
@@ -445,7 +489,8 @@ fn main() -> Result<(), JpegError>{
 	}
 	let blocs:Vec<Vec<i16>> = blocs.iter_mut().map(|b| b.do_zigzag()).collect();
 	if cmd_res.debug {
-		blocs[0].iter().for_each(|x|print!("{x} "))
+		blocs[0].iter().for_each(|x|print!("{x} "));
+		println!();
 	}
 
 	let datas = mcu_encoding(blocs)?;
