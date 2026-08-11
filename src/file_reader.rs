@@ -149,7 +149,7 @@ fn parse_pixmap(lines: &mut FileReader) -> Result<(JpegFormat,Vec<u8>),JpegError
 		}
 	}
 
-	let file_format = JpegFormat::new(sizex, sizey, comp, 4, 4);
+	let file_format = JpegFormat::new(sizex, sizey, comp, 1, 1);
 
 	Ok((file_format,data))
 }

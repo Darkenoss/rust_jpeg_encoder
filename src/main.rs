@@ -136,6 +136,9 @@ impl<T: num_traits::NumCast + Copy + Display + Num> Bloc<T> {
 				temp = vec![];
 			};
 		};
+		if res.len() == 0 {
+			res.push(self.data[0]);
+		}
 		res
 	}
 
@@ -395,46 +398,50 @@ fn single_mcu_encoding(mcu: &Vec<i16>, last_dc:i16) -> Result<Vec<(u8,BitStream)
 	Ok(output)
 }
 
-fn mcu_encoding(data: Vec<Vec<i16>>) -> Result<Vec<Vec<(u8,BitStream)>>,JpegError> {
-	let mut last_dc = 0;
+fn mcu_encoding(data: Vec<Vec<i16>>, jpeg_format: &JpegFormat) -> Result<Vec<Vec<(u8,BitStream)>>,JpegError> {
+	let mut last_dc = [0;3];
 	data.iter()
-		.map(|mcu| {
-			let res = single_mcu_encoding(mcu, last_dc);
-			last_dc = mcu[0];
+		.enumerate()
+		.map(|(c,mcu)| {
+			let res = single_mcu_encoding(mcu, last_dc[c%jpeg_format.comp as usize]);
+			last_dc[c%jpeg_format.comp as usize] = mcu[0];
 			res
 		}).collect()
 }
 
-fn huffman_separation(datas: &Vec<Vec<(u8,BitStream)>>) -> (Vec<u8>,Vec<u8>) {
-	let mut dc = vec![];
-	let mut ac = vec![];
-	datas.iter().for_each(|v|{
-		v.iter().enumerate().for_each(|(c,d)|{
-			if c == 0 {
-				dc.push(d.0);
-			} else {
-				ac.push(d.0);
-			}
+fn huffman_separation(datas: &Vec<Vec<(u8,BitStream)>>, jpeg_format: &JpegFormat) -> ([Vec<u8>;3],[Vec<u8>;3]) {
+	let mut dc: [Vec<u8>; 3] = std::array::from_fn(|_| Vec::new());
+	let mut ac: [Vec<u8>; 3] = std::array::from_fn(|_| Vec::new());
+	datas.iter()
+		.enumerate()
+		.for_each(|(b,v)|{
+			v.iter().enumerate().for_each(|(c,d)|{
+				if c == 0 {
+					dc[b%jpeg_format.comp as usize].push(d.0);
+				} else {
+					ac[b%jpeg_format.comp as usize].push(d.0);
+				}
+			});
 		});
-	});
 	(dc,ac)
 }
 
-fn encode_data(data: &Vec<Vec<(u8, BitStream)>>,huff_dc: Vec<HuffmanTree>, huff_ac: Vec<HuffmanTree>) -> Result<BitStream,JpegError> {
+fn encode_data(data: &Vec<Vec<(u8, BitStream)>>,huff_dc: [Vec<HuffmanTree>;3], huff_ac: [Vec<HuffmanTree>;3], jpeg_format: &JpegFormat) -> Result<BitStream,JpegError> {
 	let mut res = BitStream{stream: vec![]};
 	let err = false;
 	data
 		.iter()
-		.for_each(|vec| {
+		.enumerate()
+		.for_each(|(b,vec)| {
 			vec
 				.iter()
 				.enumerate()
 				.for_each(|(c,val)| {
 					let temp;
 					if c == 0 {
-						temp = encode_single(val.0, &huff_dc).unwrap();
+						temp = encode_single(val.0, &huff_dc[b%jpeg_format.comp as usize]).unwrap();
 					} else {
-						temp = encode_single(val.0, &huff_ac).unwrap();
+						temp = encode_single(val.0, &huff_ac[b%jpeg_format.comp as usize]).unwrap();
 					};
 					res.add_stream(&temp);
 					res.add_stream(&val.1);
@@ -461,21 +468,22 @@ fn main() -> Result<(), JpegError>{
 	let mut blocs = parse_bloc_line(data, &jpeg_info)?;
 
 	if cmd_res.debug {
-		println!("{:x?}",blocs[0].data);
+		println!("{:x?}",blocs[3].data);
 	}
 
 	if jpeg_info.comp == 3 {
 		to_luminance(&mut blocs);
 		if cmd_res.debug {
-			println!("{:x?}",blocs[2].data);
+			println!("{:x?}",blocs[3].data);
 		}
 	}
 
 	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_dct()).collect();
 
 	if cmd_res.debug {
-		println!("{:x?}",blocs[0].data);
-		blocs[0].display();
+		println!("{:x?}",blocs[3].data);
+		blocs[5].display();
+		println!("{} blocs",blocs.len());
 	}
 
 	let quant = read_quant(cmd_res.quant.to_string())?;
@@ -485,39 +493,49 @@ fn main() -> Result<(), JpegError>{
 
 	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_quant(&quant)).collect();
 	if cmd_res.debug {
-		blocs[0].display();
+		blocs[3].display();
 	}
 	let blocs:Vec<Vec<i16>> = blocs.iter_mut().map(|b| b.do_zigzag()).collect();
 	if cmd_res.debug {
-		blocs[0].iter().for_each(|x|print!("{x} "));
+		blocs[3].iter().for_each(|x|print!("{x} "));
 		println!();
 	}
 
-	let datas = mcu_encoding(blocs)?;
-	let (dc,ac) = huffman_separation(&datas);
+	let datas = mcu_encoding(blocs, &jpeg_info)?;
+	let (dc,ac) = huffman_separation(&datas,&jpeg_info);
 
 	if cmd_res.debug {
 		println!("{:x?}\n{:x?}",dc,ac);
 	}
+	let mut huff_dc: [Vec<HuffmanTree>;3] = Default::default();
+	let mut huff_ac: [Vec<HuffmanTree>;3] = Default::default();
+	let mut deep_dc: [[u8;16];3] = Default::default();
+	let mut deep_ac: [[u8;16];3] = Default::default();
+	let mut symbol_dc: [[Vec<u8>;16];3] = Default::default();
+	let mut symbol_ac: [[Vec<u8>;16];3] = Default::default();
 
-	let (huff_dc,deep_dc,symbol_dc) = perform_huffman_no_encoding(dc)?;
-	let (huff_ac,deep_ac,symbol_ac) = perform_huffman_no_encoding(ac)?;
+	for i in 0..(jpeg_info.comp as usize) {
+		(huff_dc[i],deep_dc[i],symbol_dc[i]) = perform_huffman_no_encoding(&dc[i])?;
+		(huff_ac[i],deep_ac[i],symbol_ac[i]) = perform_huffman_no_encoding(&ac[i])?;
+	}
 
 	if cmd_res.debug {
-		println!("{:x?}",symbol_ac);
-		let temp = huff_ac.clone();
+		println!("{:x?}",symbol_ac[0]);
+		let temp = huff_dc[0].clone();
 		for tree in temp {
 			println!("{:x},{},{:?}",tree.val, tree.freq, tree.stream.unwrap().stream);
 		}
 	}
 
-	let coded_data = encode_data(&datas, huff_dc, huff_ac)?;
+	let coded_data = encode_data(&datas, huff_dc, huff_ac, &jpeg_info)?;
 
 	jpeg_info.data = coded_data;
-	jpeg_info.huff_deep_dc.push(deep_dc);
-	jpeg_info.huff_deep_ac.push(deep_ac);
-	jpeg_info.huff_symbol_dc.push(symbol_dc);
-	jpeg_info.huff_symbol_ac.push(symbol_ac);
+	for i in 0..jpeg_info.comp as usize {
+		jpeg_info.huff_deep_dc.push(deep_dc[i]);
+		jpeg_info.huff_deep_ac.push(deep_ac[i]);
+		jpeg_info.huff_symbol_dc.push(symbol_dc[i].clone());
+		jpeg_info.huff_symbol_ac.push(symbol_ac[i].clone());
+	}
 	jpeg_info.quant_table.push(quant.do_zigzag());
 
 	let bytestream = jpeg_info.create_jpeg_bytestream();

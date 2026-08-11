@@ -78,7 +78,7 @@ impl JpegFormat {
 		for i in 0..self.comp {
 			stream.push(i);
 			stream.push((self.y_sampling<<4) + self.x_sampling);
-			stream.push(i);
+			stream.push(0); //only one quantification table supported
 		}
 	}
 
