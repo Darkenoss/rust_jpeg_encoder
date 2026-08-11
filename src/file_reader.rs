@@ -59,6 +59,11 @@ impl FileReader {
 		Ok((part.to_string(),sep))
 	}
 
+	fn remaining_data(&mut self) -> Result<Vec<u8>, JpegError> {
+		let data: Result<Vec<u8>, std::io::Error> = self.file.by_ref().collect();
+		Ok(data?)
+	}
+
 }
 
 fn parse_pixmap_comment(lines: &mut FileReader) -> Result<String, JpegError> {
@@ -128,11 +133,11 @@ fn parse_pixmap(lines: &mut FileReader) -> Result<(JpegFormat,Vec<u8>),JpegError
 
 	if isbyte {
 		let mut new_line = parse_pixmap_comment_byte(lines)?;
-		while new_line.iter().count()!= 0 {
-			new_line = new_line.iter().map(|b|(*b)*(255/max)).collect();
-			data.append(&mut new_line);
-			new_line = parse_pixmap_comment_byte(lines)?;
-		}
+		new_line = new_line.iter().map(|b|(*b)*(255/max)).collect();
+		data.append(&mut new_line);
+		data.push(LF);
+		let mut remain = lines.remaining_data()?;
+		data.append(&mut remain);
 	} else {
 		let mut new_line = parse_pixmap_comment_line(lines)?;
 		let mut error = false;
