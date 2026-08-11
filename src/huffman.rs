@@ -109,7 +109,7 @@ pub fn encode_single(val: u8, leafs: &Vec<HuffmanTree>) -> Result<BitStream,Jpeg
 }
 
 fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], jpeg_deep: [u8;16]) {
-	let mut code = 0;
+	let mut code:u16 = 0;
 	let mut last_size = 0;
 	for i in 0..16 {
 		for sym in 0..jpeg_deep[i] {

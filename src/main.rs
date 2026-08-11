@@ -153,7 +153,7 @@ impl<T: num_traits::NumCast + Copy + Display + Num> Bloc<T> {
 }
 
 impl BitStream {
-	fn new(mut val: u8, size: usize) -> Self {
+	fn new(mut val: u16, size: usize) -> Self {
 		let mut stream = vec![];
 		let mut count = 0;
 		while val!=0 && count<size {
@@ -460,10 +460,6 @@ fn main() -> Result<(), JpegError>{
 	let (mut lines, cmd_res) = parse_cmd(&args)?;
 	let (mut jpeg_info,data) = parse_file(cmd_res.format, &mut lines)?;
 
-	if cmd_res.debug {
-		println!("{:?}",data);
-	}
-
 
 	let mut blocs = parse_bloc_line(data, &jpeg_info)?;
 
@@ -504,9 +500,6 @@ fn main() -> Result<(), JpegError>{
 	let datas = mcu_encoding(blocs, &jpeg_info)?;
 	let (dc,ac) = huffman_separation(&datas,&jpeg_info);
 
-	if cmd_res.debug {
-		println!("{:x?}\n{:x?}",dc,ac);
-	}
 	let mut huff_dc: [Vec<HuffmanTree>;3] = Default::default();
 	let mut huff_ac: [Vec<HuffmanTree>;3] = Default::default();
 	let mut deep_dc: [[u8;16];3] = Default::default();
@@ -521,7 +514,7 @@ fn main() -> Result<(), JpegError>{
 
 	if cmd_res.debug {
 		println!("{:x?}",symbol_ac[0]);
-		let temp = huff_dc[0].clone();
+		let temp = huff_ac[0].clone();
 		for tree in temp {
 			println!("{:x},{},{:?}",tree.val, tree.freq, tree.stream.unwrap().stream);
 		}
@@ -539,10 +532,6 @@ fn main() -> Result<(), JpegError>{
 	jpeg_info.quant_table.push(quant.do_zigzag());
 
 	let bytestream = jpeg_info.create_jpeg_bytestream();
-
-	if cmd_res.debug {
-		println!("{:x?}",bytestream);
-	}
 
 	let mut output = args[2][..&args[2].len()-3].to_string();
 	output.push_str("jpg");
