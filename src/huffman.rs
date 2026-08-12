@@ -68,34 +68,17 @@ fn construct_huff_table(mut nodes: Vec<HuffmanTree>) -> Result<HuffmanTree,JpegE
 	Ok(nodes[0].clone())
 }
 
-fn prepare_jpeg_encoding(table: &mut HuffmanTree, deep: usize, leafs: &mut [Vec<HuffmanTree>;16], jpeg_deep: &mut [u8;16], jpeg_symbol: &mut [Vec<u8>;16]){
+fn generate_code_length(table: &mut HuffmanTree, deep: usize, code_length: &mut [u8;32]){
 	if table.isleaf {
-		if table.freq == 0 {
-			return;
-		}
-		leafs[deep-1].push(table.clone());
-		jpeg_deep[deep-1]+= 1;
-		jpeg_symbol[deep-1].push(table.val);
+		code_length[deep-1]+= 1;
 	} else {
 		if let Some(ref mut zero) = table.zero {
-			prepare_jpeg_encoding(zero, deep +1, leafs, jpeg_deep, jpeg_symbol);
+			generate_code_length(zero, deep +1, code_length);
 		}
 		if let Some(ref mut one) = table.one {
-			prepare_jpeg_encoding(one, deep +1, leafs, jpeg_deep,jpeg_symbol);
+			generate_code_length(one, deep +1, code_length);
 		}
 	}
-}
-
-fn _encode_to_bistream(values: Vec<u8>, leafs: Vec<HuffmanTree>) -> Vec<BitStream>{
-	let mut stream = vec![];
-	values.iter().for_each(|s|{
-		if let Some(code) = leafs.iter().find(|t| t.val==*s) {
-			if let Some(code_stream) = &code.stream {
-				stream.push(code_stream.clone());
-			};
-		};
-	});
-	stream
 }
 
 pub fn encode_single(val: u8, leafs: &Vec<HuffmanTree>) -> Result<BitStream,JpegError> {
@@ -108,11 +91,59 @@ pub fn encode_single(val: u8, leafs: &Vec<HuffmanTree>) -> Result<BitStream,Jpeg
 	Ok(code_stream.clone())
 }
 
-fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], jpeg_deep: [u8;16]) {
+fn adjust_code_lenght(code_length: &mut [u8;32]) -> [u8;16] {
+	let mut length = 31;
+
+	while length >= 16 {
+		if code_length[length] > 0 {
+			let mut last = length-2;
+			while code_length[last] == 0 {
+				last-=1;
+			}
+
+			code_length[length]-=2;
+			code_length[length-1]+=1;
+			code_length[last+1]+=2;
+			code_length[last]-=1;
+
+		} else {
+			length-=1;
+		}
+	}
+
+	while code_length[length] == 0 {
+		length-=1;
+	}
+
+	code_length[length]-=1;
+
+	code_length[..16].try_into().unwrap()
+}
+
+fn assign_leaf(mut leafs: Vec<HuffmanTree>, code_length: &[u8;16]) -> ([Vec<HuffmanTree>; 16], [Vec<u8>; 16]) {
+	let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
+	let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
+
+	leafs.reverse();
+
+	for length in 0..16 {
+		for _ in 0..code_length[length] {
+			let symbol = leafs.pop().unwrap();
+			if symbol.freq != 0 {
+				jpeg_symbol[length].push(symbol.val);
+				sleaf[length].push(symbol);
+			}
+		}
+	}
+
+	(sleaf,jpeg_symbol)
+}
+
+fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], code_length: [u8;16]) {
 	let mut code:u16 = 0;
 	let mut last_size = 0;
 	for i in 0..16 {
-		for sym in 0..jpeg_deep[i] {
+		for sym in 0..code_length[i] {
 			if i!=last_size {
 				code <<= i-last_size;
 				last_size = i;
@@ -123,28 +154,15 @@ fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], jpeg_deep: [u8;16]) {
 	}
 }
 
-pub fn _perform_huffman(values: &Vec<u8>) -> Result<(Vec<BitStream>,[u8;16],[Vec<u8>;16]),JpegError>{
-	let leafs = generate_freq_leafs(&values);
-	let mut table = construct_huff_table(leafs)?;
-	let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
-	let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
-	let mut jpeg_deep = [0;16];
-	prepare_jpeg_encoding(&mut table, 0, &mut sleaf, &mut jpeg_deep, &mut jpeg_symbol);
-	generate_bitstreams(&mut sleaf, jpeg_deep);
-	let eleaf = sleaf.into_iter().flatten().collect();
-	let stream = _encode_to_bistream(values.clone(), eleaf);
-	Ok((stream,jpeg_deep,jpeg_symbol))
-}
-
 pub fn perform_huffman_no_encoding(values: &Vec<u8>) -> Result<(Vec<HuffmanTree>,[u8;16],[Vec<u8>;16]),JpegError>{
 	let leafs = generate_freq_leafs(&values);
-	let mut table = construct_huff_table(leafs)?;
-	let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
-	let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
-	let mut jpeg_deep = [0;16];
-	prepare_jpeg_encoding(&mut table, 0, &mut sleaf, &mut jpeg_deep, &mut jpeg_symbol);
-	generate_bitstreams(&mut sleaf, jpeg_deep);
-	Ok((sleaf.into_iter().flatten().collect(),jpeg_deep,jpeg_symbol))
+	let mut table = construct_huff_table(leafs.clone())?;
+	let mut code_length = [0;32];
+	generate_code_length(&mut table, 0, &mut code_length);
+	let code_length = adjust_code_lenght(&mut code_length);
+	let (mut sleaf, jpeg_symbol) = assign_leaf(leafs, &code_length);
+	generate_bitstreams(&mut sleaf, code_length);
+	Ok((sleaf.into_iter().flatten().collect(),code_length,jpeg_symbol))
 }
 
 
@@ -203,7 +221,7 @@ use super::*;
 		let mut head = construct_huff_table(leafs).unwrap();
 		let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
 		let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
-		prepare_jpeg_encoding(&mut head, 0, &mut sleaf, &mut[0;16], &mut jpeg_symbol);
+		generate_code_length(&mut head, 0, &mut sleaf, &mut[0;16], &mut jpeg_symbol);
 		let leaf3 = head.zero.unwrap().stream.unwrap();
 		assert_eq!(leaf3.stream.iter().count(),1);
 		assert!(!leaf3.stream[0]);
@@ -226,7 +244,7 @@ use super::*;
 		let mut head = construct_huff_table(leafs).unwrap();
 		let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
 		let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
-		prepare_jpeg_encoding(&mut head, 0, &mut sleaf, &mut [0;16], &mut jpeg_symbol);
+		generate_code_length(&mut head, 0, &mut sleaf, &mut [0;16], &mut jpeg_symbol);
 		if let Some(leaf3) = &sleaf[1][0].stream {
 			assert_eq!(leaf3.stream.iter().count(),1);
 			assert!(!leaf3.stream[0]);
@@ -255,12 +273,12 @@ use super::*;
 		let leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
 		let mut head = construct_huff_table(leafs).unwrap();
 		let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
-		let mut jpeg_deep = [0;16];
+		let mut code_length = [0;16];
 		let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
-		prepare_jpeg_encoding(&mut head, 0, &mut sleaf, &mut jpeg_deep, &mut jpeg_symbol);
-		assert_eq!(jpeg_deep[0],1);
-		assert_eq!(jpeg_deep[1],1);
-		assert_eq!(jpeg_deep[2],1);
+		generate_code_length(&mut head, 0, &mut sleaf, &mut code_length, &mut jpeg_symbol);
+		assert_eq!(code_length[0],1);
+		assert_eq!(code_length[1],1);
+		assert_eq!(code_length[2],1);
 		assert_eq!(jpeg_symbol[0][0],3);
 		assert_eq!(jpeg_symbol[1][0],2);
 		assert_eq!(jpeg_symbol[2][0],1);
@@ -272,7 +290,7 @@ use super::*;
 		let mut head = construct_huff_table(leafs).unwrap();
 		let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
 		let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
-		prepare_jpeg_encoding(&mut head, 0, &mut sleaf, &mut [0;16], &mut jpeg_symbol);
+		generate_code_length(&mut head, 0, &mut sleaf, &mut [0;16], &mut jpeg_symbol);
 		let res = _encode_to_bistream(vec![1,3,3], sleaf.into_iter().flatten().collect());
 		assert_eq!(res[0].stream.iter().count(),3);
 		assert!(res[0].stream[0]);
