@@ -60,11 +60,12 @@ struct CmdArgs {
 	format: ImageFormat,
 	debug: bool,
 	quant: String,
+	filename: String
 }
 
 impl CmdArgs {
 	fn new() -> Self {
-		CmdArgs { format:PixMap, debug: false, quant: "quant/one".to_string() }
+		CmdArgs { format:PixMap, debug: false, quant: "quant/one".to_string(), filename: String::new() }
 	}
 }
 
@@ -242,6 +243,7 @@ fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,CmdArgs), JpegError> {
 		match cmd.as_str() {
 			"-f" => {
 				if let Some(path) = args.next() {
+					cmd_res.filename = path.clone();
 					cmd_res.format = parse_format(path)?;
 					file = path.clone();
 				} else {
@@ -533,7 +535,7 @@ fn main() -> Result<(), JpegError>{
 
 	let bytestream = jpeg_info.create_jpeg_bytestream();
 
-	let mut output = args[2][..&args[2].len()-3].to_string();
+	let mut output = cmd_res.filename[..cmd_res.filename.len()-3].to_string();
 	output.push_str("jpg");
 	let print_output = output.clone();
 
