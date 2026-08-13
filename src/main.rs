@@ -167,24 +167,8 @@ impl BitStream {
 		BitStream {stream}
 	}
 
-	fn _add(&mut self, mut nb: u16) {
-		while nb != 0 {
-			self.stream.push((nb & 1) != 0);
-			nb >>= 1;
-		}
-	}
-
-	fn push_single(&mut self, val: bool){
-		self.stream.push(val);
-	}
-
 	fn add_stream(&mut self, stream: &BitStream) {
 		stream.stream.iter().for_each(|b| self.stream.push(*b));
-	}
-
-	fn display(&self) {
-		self.stream.iter().for_each(|b|print!("{} ",b));
-		println!("");
 	}
 
 	fn to_byte(&self, stuffing: bool) -> Vec<u8> {
