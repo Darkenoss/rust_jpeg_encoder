@@ -13,6 +13,9 @@ cargo build --release
 /target/release/rust_jpeg_encoder -f images/flower.ppm
 ```
 
+## Specifications
+This implementation only encode for baseline DCT with huffman coding. Aka SOF0.
+
 ## Quantization table
 The quantization table are in the quant directory of the repository.
 If no quantization table are specified, no quantization is applied during the compression.
