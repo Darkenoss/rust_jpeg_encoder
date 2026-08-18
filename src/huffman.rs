@@ -13,50 +13,72 @@ pub struct HuffmanTree {
 	weight: u16,
 }
 
-fn create_leaf(val: u8, freq: u64) -> HuffmanTree {
-	HuffmanTree { zero:None, one: None, isleaf: true, freq, val , stream: None, weight: 1}
+impl HuffmanTree {
+	fn new(val: u8, freq: u64) -> Self {
+		HuffmanTree {
+			zero:None,
+			one: None,
+			isleaf: true,
+			freq,
+			val,
+			stream: None,
+			weight: 1}
+	}
 }
 
 fn generate_freq_leafs(val: &Vec<u8>) -> Vec<HuffmanTree> {
 	let mut freqs:HashMap<u8, u64> = HashMap::new();
-	val.iter().for_each(|v|{
-		let freq = freqs.entry(*v).or_insert(0);
-		*freq +=1;
-	});
+
+	val
+		.iter()
+		.for_each(|v|{
+			let freq = freqs.entry(*v).or_insert(0);
+			*freq +=1;
+		});
 
 	let mut res:Vec<HuffmanTree> = freqs
 		.iter()
-		.map(|(&value,&frequence)| create_leaf(value, frequence))
+		.map(|(&value,&frequence)| HuffmanTree::new(value, frequence))
 		.collect();
+
 	res.sort_by_key(|h| -(h.freq as i64));
 	res.push(HuffmanTree { zero: None, one: None, isleaf: true, val: 0, freq: 0, stream: None, weight: 257 });
 	res
 }
 
 fn insert_sorted_huffman(nodes: &mut Vec<HuffmanTree>, elem: HuffmanTree) {
+
 	let mut index = 0;
 	let size = nodes.iter().count();
+
 	while index < size && elem.freq < nodes[index].freq{
 		index+=1;
 	};
+
 	nodes.insert(index, elem);
 }
 
 fn construct_huff_table(mut nodes: Vec<HuffmanTree>) -> Result<HuffmanTree,JpegError> {
+
 	while nodes.iter().count() != 1 {
+
 		let Some(mut left) = nodes.pop() else {
 			return Err(JpegError::HuffmanError)
 		};
+
 		let Some(mut right) = nodes.pop() else {
 			return Err(JpegError::HuffmanError);
 		};
+
 		if left.weight > right.weight {
 			let temp = left;
 			left = right;
 			right = temp;
 		}
+
 		let weight = left.weight+ right.weight;
 		let freq = left.freq+right.freq;
+
 		insert_sorted_huffman(&mut nodes, HuffmanTree { zero:Some(Box::new(left)),
 														one: Some(Box::new(right)),
 														isleaf: false,
@@ -64,17 +86,22 @@ fn construct_huff_table(mut nodes: Vec<HuffmanTree>) -> Result<HuffmanTree,JpegE
 														freq,
 														stream: None,
 														weight});
+
 	};
+
 	Ok(nodes[0].clone())
 }
 
 fn generate_code_length(table: &mut HuffmanTree, deep: usize, code_length: &mut [u8;32]){
+
 	if table.isleaf {
 		code_length[deep-1]+= 1;
+
 	} else {
 		if let Some(ref mut zero) = table.zero {
 			generate_code_length(zero, deep +1, code_length);
 		}
+
 		if let Some(ref mut one) = table.one {
 			generate_code_length(one, deep +1, code_length);
 		}
@@ -82,19 +109,24 @@ fn generate_code_length(table: &mut HuffmanTree, deep: usize, code_length: &mut 
 }
 
 pub fn encode_single(val: u8, leafs: &Vec<HuffmanTree>) -> Result<BitStream,JpegError> {
+
 	let Some(code) = leafs.iter().find(|t| t.val==val) else {
 		return Err(HuffmanError);
 	};
+
 	let Some(code_stream) = &code.stream else {
 		return Err(HuffmanError);
 	};
+
 	Ok(code_stream.clone())
 }
 
 fn adjust_code_lenght(code_length: &mut [u8;32]) -> [u8;16] {
+
 	let mut length = 31;
 
 	while length >= 16 {
+
 		if code_length[length] > 0 {
 			let mut last = length-2;
 			while code_length[last] == 0 {
@@ -121,6 +153,7 @@ fn adjust_code_lenght(code_length: &mut [u8;32]) -> [u8;16] {
 }
 
 fn assign_leaf(mut leafs: Vec<HuffmanTree>, code_length: &[u8;16]) -> ([Vec<HuffmanTree>; 16], [Vec<u8>; 16]) {
+
 	let mut sleaf: [Vec<HuffmanTree>; 16] = Default::default();
 	let mut jpeg_symbol: [Vec<u8>; 16] = Default::default();
 
@@ -140,8 +173,10 @@ fn assign_leaf(mut leafs: Vec<HuffmanTree>, code_length: &[u8;16]) -> ([Vec<Huff
 }
 
 fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], code_length: [u8;16]) {
+
 	let mut code:u16 = 0;
 	let mut last_size = 0;
+
 	for i in 0..16 {
 		for sym in 0..code_length[i] {
 			if i!=last_size {
@@ -154,14 +189,20 @@ fn generate_bitstreams(sleaf: &mut [Vec<HuffmanTree>;16], code_length: [u8;16]) 
 	}
 }
 
-pub fn perform_huffman_no_encoding(values: &Vec<u8>) -> Result<(Vec<HuffmanTree>,[u8;16],[Vec<u8>;16]),JpegError>{
+pub fn perform_huffman_no_encoding(values: &Vec<u8>) -> Result<(Vec<HuffmanTree>,[u8;16],[Vec<u8>;16]),JpegError> {
+
 	let leafs = generate_freq_leafs(&values);
+
 	let mut table = construct_huff_table(leafs.clone())?;
+
 	let mut code_length = [0;32];
 	generate_code_length(&mut table, 0, &mut code_length);
+
 	let code_length = adjust_code_lenght(&mut code_length);
 	let (mut sleaf, jpeg_symbol) = assign_leaf(leafs, &code_length);
+
 	generate_bitstreams(&mut sleaf, code_length);
+
 	Ok((sleaf.into_iter().flatten().collect(),code_length,jpeg_symbol))
 }
 
@@ -174,12 +215,13 @@ use super::*;
 
 	#[test]
 	fn test_create_leaf() {
-		assert!(matches!(create_leaf(8, 11),HuffmanTree {zero:None, one: None, isleaf: true, freq: 11, val: 8, stream: None, weight: 1}))
+		assert!(matches!(HuffmanTree::new(8, 11),HuffmanTree {zero:None, one: None, isleaf: true, freq: 11, val: 8, stream: None, weight: 1}))
 	}
 
 	#[test]
 	fn test_generate_leaf() {
 		let leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
+
 		assert_eq!(leafs[2].val,1);
 		assert_eq!(leafs[2].freq,2);
 		assert_eq!(leafs[1].val,2);
@@ -192,6 +234,7 @@ use super::*;
 		let mut leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
 		insert_sorted_huffman(&mut leafs, HuffmanTree { zero:None, one: None, isleaf: true, val: 5, freq: 10, stream: None, weight:1});
 		assert_eq!(leafs[0].val,5);
+
 		insert_sorted_huffman(&mut leafs, HuffmanTree { zero:None, one: None, isleaf: true, val: 6, freq: 0, stream: None, weight:1});
 		assert_eq!(leafs[4].val,6);
 	}
@@ -201,18 +244,67 @@ use super::*;
 		let leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
 		let head = construct_huff_table(leafs).unwrap();
 		assert!(!head.isleaf);
+
 		let leaf0 = head.zero.unwrap();
 		assert!(leaf0.isleaf);
 		assert_eq!(leaf0.val,3);
+
 		let node1 = head.one.unwrap();
 		assert!(!node1.isleaf);
+
 		let leaf10 = node1.zero.unwrap();
 		assert_eq!(leaf10.val,2);
+
 		let node11 = node1.one.unwrap();
 		let leaf110 = node11.zero.unwrap();
 		assert_eq!(leaf110.val,1);
+
 		let leaf_bad = node11.one.unwrap();
 		assert_eq!(leaf_bad.freq,0);
+	}
+
+	#[test]
+	fn code_length() {
+		let leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
+
+		let mut table = construct_huff_table(leafs.clone()).unwrap();
+
+		let mut code_length = [0;32];
+		generate_code_length(&mut table, 0, &mut code_length);
+
+		assert_eq!(code_length[0],1);
+		assert_eq!(code_length[1],1);
+		assert_eq!(code_length[2],2);
+	}
+
+	#[test]
+	fn adjusted_code() {
+		let leafs = generate_freq_leafs(&vec![2,2,3,1,1,3,2,3,3]);
+
+		let mut table = construct_huff_table(leafs.clone()).unwrap();
+
+		let mut code_length = [0;32];
+		generate_code_length(&mut table, 0, &mut code_length);
+		adjust_code_lenght(&mut code_length);
+
+		assert_eq!(code_length[0],1);
+		assert_eq!(code_length[1],1);
+		assert_eq!(code_length[2],1);
+
+		code_length = Default::default();
+
+		for i in 0..16 {
+			code_length[i] = 1;
+		}
+
+		code_length[16] = 2;
+
+		adjust_code_lenght(&mut code_length);
+
+		assert_eq!(code_length[16],0);
+		assert_eq!(code_length[15],3);
+		assert_eq!(code_length[14],0);
+		assert_eq!(code_length[13],1);
 	}
 
 	#[test]
@@ -221,16 +313,20 @@ use super::*;
 		let mut head = construct_huff_table(leafs.clone()).unwrap();
 		let mut code_length = [0;32];
 		generate_code_length(&mut head, 0, &mut code_length);
+
 		let code_length = adjust_code_lenght(&mut code_length);
 		let (mut sleaf, _) = assign_leaf(leafs, &code_length);
 		generate_bitstreams(&mut sleaf, code_length);
+
 		let leaf3 = sleaf[0][0].stream.clone().unwrap();
 		assert_eq!(leaf3.stream.iter().count(),1);
 		assert!(!leaf3.stream[0]);
+
 		let leaf10 = sleaf[1][0].stream.clone().unwrap();
 		assert_eq!(leaf10.stream.iter().count(),2);
 		assert!(leaf10.stream[0]);
 		assert!(!leaf10.stream[1]);
+
 		let leaf110 = sleaf[2][0].stream.clone().unwrap();
 		assert_eq!(leaf110.stream.iter().count(),3);
 		assert!(leaf110.stream[0]);
@@ -244,8 +340,10 @@ use super::*;
 		let mut head = construct_huff_table(leafs.clone()).unwrap();
 		let mut code_length = [0;32];
 		generate_code_length(&mut head, 0, &mut code_length);
+
 		let code_length = adjust_code_lenght(&mut code_length);
 		let (_, jpeg_symbol) = assign_leaf(leafs, &code_length);
+
 		assert_eq!(code_length[0],1);
 		assert_eq!(code_length[1],1);
 		assert_eq!(code_length[2],1);
