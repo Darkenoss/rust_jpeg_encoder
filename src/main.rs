@@ -23,6 +23,16 @@ mod huffman;
 mod jpeg_format;
 mod file_reader;
 
+const HELP_FMT: &str = "-f [target source] [option]
+
+Options :
+
+-d			Shows debug info
+-q PATH		Use table at PATH for luminance quantization, default is one
+-c PATH		Use table at PATH for chrominance, default is using the same as luminance
+";
+
+
 #[derive(Debug)]
 enum JpegError {
 	FileError,
@@ -59,13 +69,14 @@ enum ImageFormat {
 struct CmdArgs {
 	format: ImageFormat,
 	debug: bool,
-	quant: String,
-	filename: String
+	quant_y: String,
+	quant_cr: String,
+	filename: String,
 }
 
 impl CmdArgs {
 	fn new() -> Self {
-		CmdArgs { format:PixMap, debug: false, quant: "quant/one".to_string(), filename: String::new() }
+		CmdArgs { format:PixMap, debug: false, quant_y: "".to_string(), quant_cr: "".to_string(), filename: String::new() }
 	}
 }
 
@@ -200,7 +211,7 @@ impl BitStream {
 }
 
 fn help(cmd: &String) -> JpegError {
-	println!("usage: {cmd} -f 'path_to_image'");
+	println!("\nUsage: {cmd} {HELP_FMT}");
 	JpegError::HelpError
 }
 
@@ -239,7 +250,14 @@ fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,CmdArgs), JpegError> {
 			}
 			"-q" => {
 				if let Some(quant) = args.next() {
-					cmd_res.quant = quant.clone();
+					cmd_res.quant_y = quant.clone();
+				} else {
+					return Err(help(&command))
+				}
+			}
+			"-c" => {
+				if let Some(quant) = args.next() {
+					cmd_res.quant_cr = quant.clone();
 				} else {
 					return Err(help(&command))
 				}
@@ -247,6 +265,10 @@ fn parse_cmd(args: &Vec<String>) -> Result<(FileReader,CmdArgs), JpegError> {
 			_ => return Err(help(&command))
 		};
 	};
+
+	if cmd_res.quant_cr == "" {
+		cmd_res.quant_cr = cmd_res.quant_y.clone();
+	}
 
 	if file == "" {
 		return Err(help(&command));
@@ -310,9 +332,14 @@ fn to_luminance(blocs: &mut Vec<Bloc<u8>>) {
 }
 
 fn read_quant(s: String) -> Result<Bloc<u8>,JpegError> {
+	if s == "" {
+		return Ok(Bloc { data: [1;64] })
+	}
+
 	let Ok(file) = fs::File::open(s) else {
 		return Err(JpegError::FileError);
 	};
+
 	let mut lines = BufReader::new(file).lines();
 	let mut quant:Bloc<u8> = Bloc { data: [0;64] };
 	for l in 0..8 {
@@ -468,12 +495,21 @@ fn main() -> Result<(), JpegError>{
 		println!("{} blocs",blocs.len());
 	}
 
-	let quant = read_quant(cmd_res.quant.to_string())?;
+	let quant = [read_quant(cmd_res.quant_y.to_string())?,read_quant(cmd_res.quant_cr.to_string())?];
 	if cmd_res.debug {
-		quant.display();
+		quant[0].display();
 	}
 
-	let mut blocs:Vec<Bloc<i16>> = blocs.iter_mut().map(|b| b.do_quant(&quant)).collect();
+	let mut blocs:Vec<Bloc<i16>> = blocs
+		.iter_mut()
+		.enumerate()
+		.map(|(c,b)| {
+			if c%3 == 0 {
+				b.do_quant(&quant[0])
+			} else {
+				b.do_quant(&quant[1])
+			}
+		}).collect();
 	if cmd_res.debug {
 		blocs[3].display();
 	}
@@ -515,7 +551,9 @@ fn main() -> Result<(), JpegError>{
 		jpeg_info.huff_symbol_dc.push(symbol_dc[i].clone());
 		jpeg_info.huff_symbol_ac.push(symbol_ac[i].clone());
 	}
-	jpeg_info.quant_table.push(quant.do_zigzag());
+	for quant_table in quant {
+		jpeg_info.quant_table.push(quant_table.do_zigzag());
+	}
 
 	let bytestream = jpeg_info.create_jpeg_bytestream();
 
